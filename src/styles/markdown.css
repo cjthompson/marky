@@ -3,13 +3,19 @@
 .markdown-body {
   @apply text-foreground leading-7;
   font-size: 0.9375rem;
-  max-width: 860px;
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
   margin: 0 auto;
   padding: 2rem 2.5rem 6rem;
 }
 
-.markdown-body > *:first-child { margin-top: 0; }
-.markdown-body > *:last-child { margin-bottom: 0; }
+.markdown-body > *:first-child {
+  margin-top: 0;
+}
+.markdown-body > *:last-child {
+  margin-bottom: 0;
+}
 
 .markdown-body h1,
 .markdown-body h2,
@@ -22,32 +28,76 @@
   margin-bottom: 0.75rem;
   scroll-margin-top: 4rem;
 }
-.markdown-body h1 { font-size: 2rem; line-height: 1.2; border-bottom: 1px solid var(--border); padding-bottom: 0.4em; }
-.markdown-body h2 { font-size: 1.5rem; line-height: 1.3; border-bottom: 1px solid var(--border); padding-bottom: 0.3em; }
-.markdown-body h3 { font-size: 1.25rem; }
-.markdown-body h4 { font-size: 1.05rem; }
-.markdown-body h5 { font-size: 0.95rem; @apply text-muted-foreground; }
-.markdown-body h6 { font-size: 0.85rem; @apply text-muted-foreground uppercase tracking-wider; }
+.markdown-body h1 {
+  font-size: 2rem;
+  line-height: 1.2;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.4em;
+}
+.markdown-body h2 {
+  font-size: 1.5rem;
+  line-height: 1.3;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.3em;
+}
+.markdown-body h3 {
+  font-size: 1.25rem;
+}
+.markdown-body h4 {
+  font-size: 1.05rem;
+}
+.markdown-body h5 {
+  font-size: 0.95rem;
+  @apply text-muted-foreground;
+}
+.markdown-body h6 {
+  font-size: 0.85rem;
+  @apply text-muted-foreground uppercase tracking-wider;
+}
 
-.markdown-body p { margin: 0.75rem 0; }
-.markdown-body a { @apply text-primary underline underline-offset-2; }
-.markdown-body a:hover { @apply opacity-80; }
+.markdown-body p {
+  margin: 0.75rem 0;
+}
+.markdown-body a {
+  @apply text-primary underline underline-offset-2;
+}
+.markdown-body a:hover {
+  @apply opacity-80;
+}
 
-.markdown-body strong { @apply font-semibold; }
-.markdown-body em { font-style: italic; }
-.markdown-body del { @apply text-muted-foreground line-through; }
+.markdown-body strong {
+  @apply font-semibold;
+}
+.markdown-body em {
+  font-style: italic;
+}
+.markdown-body del {
+  @apply text-muted-foreground line-through;
+}
 
 .markdown-body ul,
 .markdown-body ol {
   margin: 0.75rem 0;
   padding-left: 1.5rem;
 }
-.markdown-body ul { list-style: disc; }
-.markdown-body ol { list-style: decimal; }
-.markdown-body li { margin: 0.25rem 0; }
-.markdown-body li > ul, .markdown-body li > ol { margin: 0.25rem 0; }
+.markdown-body ul {
+  list-style: disc;
+}
+.markdown-body ol {
+  list-style: decimal;
+}
+.markdown-body li {
+  margin: 0.25rem 0;
+}
+.markdown-body li > ul,
+.markdown-body li > ol {
+  margin: 0.25rem 0;
+}
 
-.markdown-body .task-list-item { list-style: none; margin-left: -1.25rem; }
+.markdown-body .task-list-item {
+  list-style: none;
+  margin-left: -1.25rem;
+}
 .markdown-body .task-list-item input[type="checkbox"] {
   margin-right: 0.5rem;
   vertical-align: middle;
@@ -75,17 +125,23 @@
   display: block;
   overflow-x: auto;
 }
-.markdown-body th, .markdown-body td {
+.markdown-body th,
+.markdown-body td {
   border: 1px solid var(--border);
   padding: 0.5rem 0.75rem;
   text-align: left;
 }
-.markdown-body th { @apply bg-muted font-semibold; }
-.markdown-body tr:nth-child(2n) td { background: color-mix(in oklch, var(--muted) 40%, transparent); }
+.markdown-body th {
+  @apply bg-muted font-semibold;
+}
+.markdown-body tr:nth-child(2n) td {
+  background: color-mix(in oklch, var(--muted) 40%, transparent);
+}
 
 .markdown-body code:not(pre code) {
   @apply bg-muted text-foreground rounded;
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-family:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   font-size: 0.88em;
   padding: 0.12em 0.35em;
 }
@@ -102,7 +158,8 @@
 .markdown-body pre.shiki {
   display: block;
   padding: 1rem 1.1rem;
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-family:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   font-size: 0.86em;
   line-height: 1.55;
   overflow-x: auto;
@@ -111,8 +168,13 @@
 /* Shiki paints inline color/background on the <pre> and on every token
    <span> based on the theme passed at render time, so no extra mapping
    needed here. We just keep padding consistent with our own pre rule. */
-.markdown-body pre.shiki { padding: 1rem 1.1rem; }
-.markdown-body pre.shiki code { background: transparent; padding: 0; }
+.markdown-body pre.shiki {
+  padding: 1rem 1.1rem;
+}
+.markdown-body pre.shiki code {
+  background: transparent;
+  padding: 0;
+}
 
 .markdown-body .copy-code-btn {
   position: absolute;
@@ -128,10 +190,17 @@
   opacity: 0;
   transition: opacity 120ms ease;
 }
-.markdown-body pre:hover .copy-code-btn { opacity: 1; }
-.markdown-body .copy-code-btn:hover { color: var(--foreground); }
+.markdown-body pre:hover .copy-code-btn {
+  opacity: 1;
+}
+.markdown-body .copy-code-btn:hover {
+  color: var(--foreground);
+}
 
-.markdown-body img { max-width: 100%; border-radius: 0.4rem; }
+.markdown-body img {
+  max-width: 100%;
+  border-radius: 0.4rem;
+}
 
 .markdown-body .mermaid-block {
   background: var(--muted);
@@ -142,7 +211,10 @@
   text-align: center;
   overflow-x: auto;
 }
-.markdown-body .mermaid-block svg { max-width: 100%; height: auto; }
+.markdown-body .mermaid-block svg {
+  max-width: 100%;
+  height: auto;
+}
 
 .markdown-body mark.doc-search-match {
   background: color-mix(in oklch, var(--muted-foreground) 35%, transparent);
