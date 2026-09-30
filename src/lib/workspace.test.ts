@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createInitialState, reduce, getActivePane, getActiveTab } from "./workspace";
+import { createInitialState, reduce, getActivePane, getActiveTab, isDirty } from "./workspace";
 
 const open = (state: ReturnType<typeof createInitialState>, path: string, source = "x") =>
   reduce(state, { type: "OPEN_FILE", path, title: path, source });
@@ -102,5 +102,129 @@ describe("workspace reducer", () => {
     const before = s.activePaneId;
     s = reduce(s, { type: "FOCUS_PANE", paneId: "nonexistent" });
     expect(s.activePaneId).toBe(before);
+  });
+});
+
+describe("edit-mode reducer transitions", () => {
+  it("OPEN_FILE seeds savedSource equal to source (clean)", () => {
+    const s = open(createInitialState("w"), "/a.md", "hello");
+    const tab = getActiveTab(s)!;
+    expect(isDirty(tab)).toBe(false);
+    expect(tab.savedSource).toBe("hello");
+  });
+
+  it("COMMIT_EDIT sets source, pushes history, clears future", () => {
+    let s = createInitialState("w");
+    s = open(s, "/a.md", "v1");
+    const tabId = getActiveTab(s)!.id;
+    s = reduce(s, { type: "COMMIT_EDIT", tabId, source: "v2" });
+    let t = s.tabs[tabId];
+    expect(t.source).toBe("v2");
+    expect(t.history).toEqual(["v1"]);
+    expect(t.future).toEqual([]);
+
+    s = reduce(s, { type: "COMMIT_EDIT", tabId, source: "v3" });
+    t = s.tabs[tabId];
+    expect(t.history).toEqual(["v1", "v2"]);
+  });
+
+  it("UNDO/REDO swap source between history and future", () => {
+    let s = createInitialState("w");
+    s = open(s, "/a.md", "v1");
+    const tabId = getActiveTab(s)!.id;
+    s = reduce(s, { type: "COMMIT_EDIT", tabId, source: "v2" });
+    s = reduce(s, { type: "UNDO", tabId });
+    expect(s.tabs[tabId].source).toBe("v1");
+    expect(s.tabs[tabId].future).toEqual(["v2"]);
+    s = reduce(s, { type: "REDO", tabId });
+    expect(s.tabs[tabId].source).toBe("v2");
+    expect(s.tabs[tabId].future).toEqual([]);
+  });
+
+  it("SAVED records savedSource and clears disk notice", () => {
+    let s = createInitialState("w");
+    s = open(s, "/a.md", "v1");
+    const tabId = getActiveTab(s)!.id;
+    s = reduce(s, { type: "DISK_CONFLICT", tabId, disk: "from-disk" });
+    s = reduce(s, { type: "SAVED", tabId, savedSource: "v1" });
+    expect(s.tabs[tabId].savedSource).toBe("v1");
+    expect(s.tabs[tabId].diskNotice).toBeUndefined();
+  });
+
+  it("DISK_RELOADED overwrites source + savedSource and records previous", () => {
+    let s = createInitialState("w");
+    s = open(s, "/a.md", "v1");
+    const tabId = getActiveTab(s)!.id;
+    s = reduce(s, { type: "DISK_RELOADED", tabId, source: "v2", previous: "v1" });
+    expect(s.tabs[tabId].source).toBe("v2");
+    expect(s.tabs[tabId].savedSource).toBe("v2");
+    expect(s.tabs[tabId].diskNotice).toEqual({ kind: "reloaded", previous: "v1" });
+  });
+
+  it("RESTORE_PREVIOUS brings back previous, makes tab dirty, switches to edit", () => {
+    let s = createInitialState("w");
+    s = open(s, "/a.md", "v1");
+    const tabId = getActiveTab(s)!.id;
+    s = reduce(s, { type: "DISK_RELOADED", tabId, source: "v2", previous: "v1" });
+    s = reduce(s, { type: "RESTORE_PREVIOUS", tabId });
+    expect(s.tabs[tabId].source).toBe("v1");
+    expect(s.tabs[tabId].savedSource).toBe("v2");
+    expect(s.tabs[tabId].mode).toBe("edit");
+    expect(s.tabs[tabId].diskNotice).toBeUndefined();
+    expect(isDirty(s.tabs[tabId])).toBe(true);
+  });
+
+  it("KEEP_MINE pins savedSource to disk without touching source", () => {
+    let s = createInitialState("w");
+    s = open(s, "/a.md", "v1");
+    const tabId = getActiveTab(s)!.id;
+    s = reduce(s, { type: "DISK_CONFLICT", tabId, disk: "from-disk" });
+    s = reduce(s, { type: "COMMIT_EDIT", tabId, source: "mine" });
+    s = reduce(s, { type: "KEEP_MINE", tabId, disk: "from-disk" });
+    expect(s.tabs[tabId].source).toBe("mine");
+    expect(s.tabs[tabId].savedSource).toBe("from-disk");
+    expect(isDirty(s.tabs[tabId])).toBe(true);
+  });
+
+  it("APPLY_MERGE replaces source with merged and pins savedSource to disk", () => {
+    let s = createInitialState("w");
+    s = open(s, "/a.md", "v1");
+    const tabId = getActiveTab(s)!.id;
+    s = reduce(s, { type: "DISK_CONFLICT", tabId, disk: "from-disk" });
+    s = reduce(s, { type: "APPLY_MERGE", tabId, merged: "merged-with-markers" });
+    expect(s.tabs[tabId].source).toBe("merged-with-markers");
+    expect(s.tabs[tabId].savedSource).toBe("from-disk");
+    expect(s.tabs[tabId].diskNotice).toBeUndefined();
+  });
+
+  it("SET_MODE and SET_VIEW update the tab only", () => {
+    let s = createInitialState("w");
+    s = open(s, "/a.md", "v1");
+    const tabId = getActiveTab(s)!.id;
+    s = reduce(s, { type: "SET_MODE", tabId, mode: "edit" });
+    s = reduce(s, { type: "SET_VIEW", tabId, view: "source" });
+    expect(s.tabs[tabId].mode).toBe("edit");
+    expect(s.tabs[tabId].view).toBe("source");
+  });
+
+  it("DISMISS_NOTICE clears diskNotice only", () => {
+    let s = createInitialState("w");
+    s = open(s, "/a.md", "v1");
+    const tabId = getActiveTab(s)!.id;
+    s = reduce(s, { type: "DISK_CONFLICT", tabId, disk: "x" });
+    s = reduce(s, { type: "DISMISS_NOTICE", tabId });
+    expect(s.tabs[tabId].diskNotice).toBeUndefined();
+    expect(s.tabs[tabId].source).toBe("v1");
+  });
+
+  it("SET_DIAGNOSTICS records diagnostics on the tab", () => {
+    let s = createInitialState("w");
+    s = open(s, "/a.md", "v1");
+    const tabId = getActiveTab(s)!.id;
+    const diags = [
+      { line: 1, column: 1, end_line: 1, end_column: 4, rule: "MD001", message: "x", severity: "warning" as const },
+    ];
+    s = reduce(s, { type: "SET_DIAGNOSTICS", tabId, diagnostics: diags });
+    expect(s.tabs[tabId].diagnostics).toEqual(diags);
   });
 });
