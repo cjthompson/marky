@@ -109,6 +109,13 @@ describe("extractHeadings", () => {
     expect(hs[2]).toMatchObject({ level: 3, text: "Three", slug: "three" });
   });
 
+  it("returns 1-based source line for each heading", () => {
+    const md = `# One\n\npara\n\n## Two\n`;
+    const hs = extractHeadings(md);
+    expect(hs[0].line).toBe(1);
+    expect(hs[1].line).toBe(5);
+  });
+
   it("handles documents without headings", () => {
     expect(extractHeadings("just text\n\nmore text")).toEqual([]);
   });

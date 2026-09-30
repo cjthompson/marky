@@ -9,6 +9,8 @@ export interface ParsedHeading {
   level: number;
   text: string;
   slug: string;
+  /** 1-based source line of the heading's opening line. */
+  line: number;
 }
 
 const md = new MarkdownIt({
@@ -109,7 +111,8 @@ export function extractHeadings(source: string): ParsedHeading[] {
     const inline = tokens[i + 1];
     const text = inline?.content || "";
     const slug = (t.attrGet("id") as string) || text.toLowerCase().replace(/\s+/g, "-");
-    out.push({ level, text, slug });
+    const line = t.map ? t.map[0] + 1 : 0;
+    out.push({ level, text, slug, line });
   }
   return out;
 }
