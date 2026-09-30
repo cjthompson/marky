@@ -32,7 +32,7 @@ Decisions confirmed with the user:
 | Reload File | ⌘R | active tab has a file |
 | Rescan Folder | ⇧⌘R | active file is inside a registered folder |
 | — | | |
-| Export ▸ HTML… | ⌘S | active tab has a file |
+| Export ▸ HTML… | ⌥⌘E | active tab has a file |
 | Export ▸ Markdown Copy… | ⇧⌘S | active tab has a file |
 | Print… | ⌘P | active tab present |
 | — | | |
@@ -195,7 +195,7 @@ Steps run top to bottom, and each one leaves the app working. Every step heading
   - touch a new `.md` in a folder, then ⇧⌘R: the tree shows it
   - edit the open file externally, then ⌘R: the content updates
   - Open Recent lists the file just opened; Clear Menu empties it; a recent folder that was closed re-adds on click
-  - ⌘S → `.html` opens in Safari offline with highlighting and mermaid intact (dark theme preserved)
+  - ⌥⌘E → `.html` opens in Safari offline with highlighting and mermaid intact (dark theme preserved)
   - ⇧⌘S → `cmp` shows the copy is byte-identical
   - ⌘P → print preview shows only the document, paginated. "Save as PDF" gives a clean PDF
   - ⌥⌘R → Finder selects the file
