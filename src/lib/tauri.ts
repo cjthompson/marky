@@ -106,7 +106,12 @@ export type MenuAction =
   | "close-split"
   | "zoom-in"
   | "zoom-out"
-  | "zoom-reset";
+  | "zoom-reset"
+  | "save"
+  | "discard-changes"
+  | "edit-mode"
+  | "undo"
+  | "redo";
 
 export function onMenuAction(cb: (action: MenuAction) => void): Promise<UnlistenFn> {
   return listen<MenuAction>("menu://action", (e) => cb(e.payload));
