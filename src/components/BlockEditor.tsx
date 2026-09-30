@@ -3,6 +3,8 @@ import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { extensionsForSource } from "@/lib/codemirror";
 import { detectEol } from "@/lib/sourceEdit";
+import { lintDiagnosticsStatic } from "@/lib/lint";
+import type { Diagnostic } from "@/lib/workspace";
 
 interface Props {
   /** Source lines that this block replaces. */
@@ -11,6 +13,14 @@ interface Props {
   onCommit: (text: string) => void;
   /** Close without saving. */
   onCancel: () => void;
+  /**
+   * Diagnostics in tab-global line coordinates. The block editor receives only
+   * the slice's text, so diagnostics must already be filtered/shifted here.
+   * Pass `sourceOffset = blockStart - 1` so a tab-global line `N` becomes
+   * line `N - sourceOffset` inside this editor.
+   */
+  diagnostics?: Diagnostic[];
+  sourceOffset?: number;
 }
 
 /**
@@ -21,7 +31,7 @@ interface Props {
  * keystroke — it returns the final text to the parent so the source map
  * and history get updated exactly once per commit.
  */
-export function BlockEditor({ initialText, onCommit, onCancel }: Props) {
+export function BlockEditor({ initialText, onCommit, onCancel, diagnostics, sourceOffset = 0 }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
 
@@ -33,6 +43,7 @@ export function BlockEditor({ initialText, onCommit, onCancel }: Props) {
       doc: initialText,
       extensions: [
         ...extensionsForSource(initialText || "\n"),
+        lintDiagnosticsStatic(initialText, diagnostics ?? [], sourceOffset),
         EditorView.domEventHandlers({
           // Click outside the editor → commit.
           click: (event, view) => {

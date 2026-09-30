@@ -4,6 +4,7 @@ import { TabBar } from "@/components/TabBar";
 import { Viewer } from "@/components/Viewer";
 import { SourceView } from "@/components/SourceView";
 import { DocSearch } from "@/components/DocSearch";
+import { DiskChangeBanner } from "@/components/DiskChangeBanner";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -21,6 +22,13 @@ interface Props {
   onToggleCheckbox?: (tabId: string, line: number) => void;
   /** Source-view typing updates the tab's source immediately. */
   onSourceEdit?: (tabId: string, source: string) => void;
+  /** Disk-change banner callbacks (all only fire when active tab has a notice). */
+  onShowChanges?: () => void;
+  onRestorePrevious?: () => void;
+  onReloadFromDisk?: () => void;
+  onKeepMine?: () => void;
+  onMerge?: () => void;
+  onDismissNotice?: () => void;
 }
 
 export function Pane({
@@ -35,6 +43,12 @@ export function Pane({
   onCommitBlock,
   onToggleCheckbox,
   onSourceEdit,
+  onShowChanges,
+  onRestorePrevious,
+  onReloadFromDisk,
+  onKeepMine,
+  onMerge,
+  onDismissNotice,
 }: Props) {
   const activeTab = pane.activeTabId ? tabs[pane.activeTabId] : undefined;
   const articleRef = useRef<HTMLElement>(null);
@@ -57,6 +71,17 @@ export function Pane({
         onClose={onCloseTab}
         onFocusPane={onFocusPane}
       />
+      {activeTab?.diskNotice && onShowChanges && onDismissNotice && (
+        <DiskChangeBanner
+          tab={activeTab}
+          onShowChanges={onShowChanges}
+          onRestorePrevious={onRestorePrevious}
+          onReloadFromDisk={onReloadFromDisk}
+          onKeepMine={onKeepMine}
+          onMerge={onMerge}
+          onDismissNotice={onDismissNotice}
+        />
+      )}
       <div className="relative flex min-h-0 flex-1">
         {activeTab ? (
           activeTab.view === "source" ? (
@@ -65,6 +90,7 @@ export function Pane({
               source={activeTab.source}
               editable={activeTab.mode === "edit" && activeTab.filePath !== undefined}
               onSourceChange={onSourceEdit ? (next) => onSourceEdit(activeTab.id, next) : undefined}
+              diagnostics={activeTab.diagnostics ?? []}
             />
           ) : (
             <Viewer
@@ -76,6 +102,7 @@ export function Pane({
               mode={activeTab.mode}
               onCommitBlock={onCommitBlock ? (s, e, t) => onCommitBlock(activeTab.id, s, e, t) : undefined}
               onToggleCheckbox={onToggleCheckbox ? (l) => onToggleCheckbox(activeTab.id, l) : undefined}
+              diagnostics={activeTab.diagnostics ?? []}
             />
           )
         ) : (

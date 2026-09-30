@@ -34,6 +34,9 @@ export function TabBar({ pane, tabs, isFocused, onSelect, onClose, onFocusPane }
         const tab = tabs[id];
         const active = id === pane.activeTabId;
         const dirty = tab ? isDirty(tab) : false;
+        const diskNotice = tab?.diskNotice;
+        // Disk-change is the more pressing state; if both dirty and
+        // diskNotice are set we show only the disk-notice dot.
         return (
           <div
             key={id}
@@ -45,13 +48,19 @@ export function TabBar({ pane, tabs, isFocused, onSelect, onClose, onFocusPane }
                 : "border-transparent text-muted-foreground hover:bg-accent"
             )}
           >
-            {dirty && (
+            {diskNotice ? (
+              <span
+                aria-label="File changed on disk"
+                title="File changed on disk"
+                className="h-1.5 w-1.5 shrink-0 rounded-full bg-sky-500"
+              />
+            ) : dirty ? (
               <span
                 aria-label="Unsaved changes"
                 title="Unsaved changes"
                 className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500"
               />
-            )}
+            ) : null}
             <span className="max-w-[160px] truncate">{tabLabel(tab)}</span>
             <button
               type="button"

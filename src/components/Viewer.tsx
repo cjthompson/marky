@@ -1,15 +1,17 @@
 import * as React from "react";
 import { createPortal } from "react-dom";
-import { Pencil } from "lucide-react";
+import { Pencil, AlertTriangle } from "lucide-react";
 import { renderMarkdown } from "@/lib/markdown";
 import { highlightCode } from "@/lib/highlight";
-import { renderMermaidBlocks } from "@/lib/mermaid";
+import { renderMermaidBlocks, renderMermaidSource } from "@/lib/mermaid";
 import { attachCopyButtons } from "@/components/CodeCopyOverlay";
 import { handleCopyAsMarkdown } from "@/lib/copyAsMarkdown";
 import { BlockEditor } from "@/components/BlockEditor";
-import { findEditableBlock, parseSourceMap } from "@/lib/sourceEdit";
+import { findEditableBlock, parseSourceMap, toggleTaskAt } from "@/lib/sourceEdit";
 import { useTheme } from "@/lib/theme";
 import { usePreferences } from "@/lib/preferences";
+import type { Diagnostic } from "@/lib/workspace";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface Props {
   source: string;
@@ -21,9 +23,16 @@ interface Props {
   onCommitBlock?: (start: number, end: number, newText: string) => void;
   /** Persist a checkbox toggle for the line containing `el`. */
   onToggleCheckbox?: (line: number) => void;
+  /** Lint diagnostics for the current source. */
+  diagnostics?: Diagnostic[];
 }
 
 const scrollMemory = new Map<string, number>();
+
+/** Find diagnostics whose line range intersects a block's [start, end] range. */
+function diagnosticsForBlock(diags: Diagnostic[], start: number, end: number): Diagnostic[] {
+  return diags.filter((d) => d.line >= start && d.line <= end);
+}
 
 export function Viewer({
   source,
@@ -33,6 +42,7 @@ export function Viewer({
   mode,
   onCommitBlock,
   onToggleCheckbox,
+  diagnostics,
 }: Props) {
   const internalRef = React.useRef<HTMLElement>(null);
   const ref = (articleRef ?? internalRef) as React.RefObject<HTMLElement | null>;
@@ -66,6 +76,50 @@ export function Viewer({
     setEditing(null);
   }, [source]);
 
+  // Sync pass before paint: apply any cache hits so the article never flashes
+  // plain text. `highlightCode` and `renderMermaidSource` resolve immediately
+  // on a hit, so awaiting them here is cheap; misses fall through to the async
+  // effect below.
+  React.useLayoutEffect(() => {
+    const root = ref.current;
+    if (!root) return;
+
+    const codeBlocks = root.querySelectorAll<HTMLElement>("pre > code[class*='language-']");
+    for (const code of Array.from(codeBlocks)) {
+      const cls = code.className;
+      const match = cls.match(/language-([\w+-]+)/);
+      const lang = match?.[1];
+      const text = code.textContent || "";
+      // Synchronous on cache hits, falls through on a miss.
+      void highlightCode(text, lang, resolved).then((highlighted) => {
+        const pre = code.parentElement;
+        if (!pre || !pre.isConnected || !pre.parentElement) return;
+        const tpl = document.createElement("template");
+        tpl.innerHTML = highlighted.trim();
+        const replacement = tpl.content.firstElementChild;
+        if (!replacement) return;
+        const sourceMap = pre.getAttribute("data-source-map");
+        if (sourceMap) replacement.setAttribute("data-source-map", sourceMap);
+        pre.replaceWith(replacement);
+      });
+    }
+
+    const mermaidBlocks = root.querySelectorAll<HTMLPreElement>("pre.mermaid-pending");
+    for (const pre of Array.from(mermaidBlocks)) {
+      const source = pre.textContent || "";
+      void renderMermaidSource(source, resolved).then((svg) => {
+        if (!pre.isConnected || !pre.parentElement) return;
+        const wrapper = document.createElement("div");
+        wrapper.className = "mermaid-block";
+        wrapper.innerHTML = svg;
+        const sourceMap = pre.getAttribute("data-source-map");
+        if (sourceMap) wrapper.setAttribute("data-source-map", sourceMap);
+        pre.replaceWith(wrapper);
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [html, resolved]);
+
   React.useEffect(() => {
     const root = ref.current;
     if (!root) return;
@@ -74,6 +128,9 @@ export function Viewer({
     (async () => {
       const codeBlocks = root.querySelectorAll<HTMLElement>("pre > code[class*='language-']");
       for (const code of Array.from(codeBlocks)) {
+        // Skip blocks already replaced by the sync pass — those have no
+        // remaining plain-text sibling.
+        if (!code.isConnected || !code.parentElement) continue;
         const cls = code.className;
         const match = cls.match(/language-([\w+-]+)/);
         const lang = match?.[1];
@@ -254,6 +311,42 @@ export function Viewer({
     };
   }, [mode, openEditorFor, onToggleCheckbox]);
 
+  // ---------- Margin markers (lint) ---------------------------------------
+
+  const markers = React.useMemo(() => {
+    if (!diagnostics || diagnostics.length === 0) return [];
+    const root = ref.current;
+    if (!root) return [];
+    const scroller = scrollerRef.current;
+    if (!scroller) return [];
+    const scrollerRect = scroller.getBoundingClientRect();
+    const seen = new Set<HTMLElement>();
+    const out: {
+      el: HTMLElement;
+      top: number;
+      blockStart: number;
+      blockEnd: number;
+      diags: Diagnostic[];
+    }[] = [];
+    for (const el of root.querySelectorAll<HTMLElement>("[data-source-map]")) {
+      const map = parseSourceMap(el.getAttribute("data-source-map"));
+      if (!map) continue;
+      const blockDiags = diagnosticsForBlock(diagnostics, map[0], map[1]);
+      if (blockDiags.length === 0) continue;
+      if (seen.has(el)) continue;
+      seen.add(el);
+      const rect = el.getBoundingClientRect();
+      out.push({
+        el,
+        top: rect.top - scrollerRect.top + scroller.scrollTop,
+        blockStart: map[0],
+        blockEnd: map[1],
+        diags: blockDiags,
+      });
+    }
+    return out;
+  }, [diagnostics, html]);
+
   // ---------- Render -------------------------------------------------------
 
   const dangerousHtml = React.useMemo(() => ({ __html: html }), [html]);
@@ -284,12 +377,46 @@ export function Viewer({
     <div ref={scrollerRef} className="relative h-full w-full overflow-auto print:h-auto print:overflow-visible">
       <article ref={ref} className="markdown-body" dangerouslySetInnerHTML={dangerousHtml} />
       {pencil}
+      {markers.map((m) => (
+        <Tooltip key={`${m.blockStart}-${m.blockEnd}`}>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              aria-label={`${m.diags.length} problem${m.diags.length === 1 ? "" : "s"} on lines ${m.blockStart}-${m.blockEnd}`}
+              className="marker-button pointer-events-auto absolute z-10 -translate-x-7 translate-y-1 inline-flex h-5 items-center gap-1 rounded px-1.5 text-[10px] font-medium text-destructive hover:bg-destructive hover:text-destructive-foreground"
+              style={{
+                top: m.top,
+                left: -56,
+                position: "absolute" as const,
+              }}
+              onClick={() => openEditorFor(m.el)}
+            >
+              <AlertTriangle className="h-3 w-3" />
+              {m.diags.length}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="left">
+            <div className="space-y-0.5">
+              {m.diags.slice(0, 5).map((d, i) => (
+                <div key={`${d.rule}-${d.line}-${i}`} className="text-xs">
+                  <span className="font-mono">{d.rule}</span>: {d.message}
+                </div>
+              ))}
+              {m.diags.length > 5 && (
+                <div className="text-xs text-muted-foreground">+{m.diags.length - 5} more</div>
+              )}
+            </div>
+          </TooltipContent>
+        </Tooltip>
+      ))}
       {editing &&
         createPortal(
           <BlockEditor
             initialText={editing.initialText}
             onCommit={handleCommit}
             onCancel={closeEditor}
+            diagnostics={diagnosticsForBlock(diagnostics ?? [], editing.blockStart, editing.blockEnd)}
+            sourceOffset={editing.blockStart - 1}
           />,
           editing.placeholder,
         )}

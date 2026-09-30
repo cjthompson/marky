@@ -238,6 +238,7 @@ pub struct PreferencesPayload {
     pub sidebar_right_width: Option<u32>,
     pub copy_as_markdown: Option<bool>,
     pub sidebar_group_by_repo: Option<bool>,
+    pub lint_enabled: Option<bool>,
 }
 
 #[tauri::command]
@@ -251,6 +252,7 @@ pub fn save_preferences(
         s.sidebar_right_width = prefs.sidebar_right_width;
         s.copy_as_markdown = prefs.copy_as_markdown;
         s.sidebar_group_by_repo = prefs.sidebar_group_by_repo;
+        s.lint_enabled = prefs.lint_enabled;
     })
 }
 
@@ -263,6 +265,7 @@ pub fn load_preferences(registry: State<'_, SharedRegistry>) -> PreferencesPaylo
         sidebar_right_width: s.sidebar_right_width,
         copy_as_markdown: s.copy_as_markdown,
         sidebar_group_by_repo: s.sidebar_group_by_repo,
+        lint_enabled: s.lint_enabled,
     }
 }
 
@@ -322,6 +325,27 @@ pub async fn export_html(app: AppHandle, html: String, suggested_name: String) -
 #[tauri::command]
 pub async fn export_markdown(app: AppHandle, source_path: String) -> AppResult<Option<String>> {
     crate::export::export_markdown(&app, source_path)
+}
+
+/// Re-export of the lint diagnostic type so the frontend IPC type comes from
+/// the same Rust source as the rest of the command's surface.
+pub use crate::lint::Diagnostic;
+
+/// Run markdown lint on `contents`. `path` is used for config discovery only
+/// (`.rumdl.toml` lookup walks up from its directory). Panics inside the
+/// blocking task are swallowed to `vec![]` so a malformed file can't crash
+/// the UI; the function never returns an error.
+#[tauri::command]
+pub async fn lint_markdown(path: Option<String>, contents: String) -> Vec<Diagnostic> {
+    let path_buf = path.map(std::path::PathBuf::from);
+    match tauri::async_runtime::spawn_blocking(move || {
+        crate::lint::lint_impl(&contents, path_buf.as_deref())
+    })
+    .await
+    {
+        Ok(v) => v,
+        Err(_) => Vec::new(),
+    }
 }
 
 #[cfg(test)]

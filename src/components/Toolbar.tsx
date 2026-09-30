@@ -16,7 +16,8 @@ import {
 import { Search, Sun, Moon, Monitor, FileText, SplitSquareHorizontal, SplitSquareVertical, X, Settings, Minus, Plus, Pencil, Lock, Save, RotateCcw } from "lucide-react";
 import { useTheme, type Theme } from "@/lib/theme";
 import { usePreferences } from "@/lib/preferences";
-import type { SplitDirection } from "@/lib/workspace";
+import type { Diagnostic, SplitDirection } from "@/lib/workspace";
+import { ProblemsMenu } from "@/components/ProblemsMenu";
 
 interface Props {
   filePath?: string;
@@ -32,6 +33,9 @@ interface Props {
   dirty: boolean;
   onSave: () => void;
   onDiscard: () => void;
+  problemsCount: number;
+  problems: Diagnostic[];
+  onSelectProblem: (d: Diagnostic) => void;
 }
 
 export function Toolbar({
@@ -48,6 +52,9 @@ export function Toolbar({
   dirty,
   onSave,
   onDiscard,
+  problemsCount,
+  problems,
+  onSelectProblem,
 }: Props) {
   const { theme, setTheme } = useTheme();
   const { copyAsMarkdown, setCopyAsMarkdown, zoom, zoomIn, zoomOut, zoomReset } = usePreferences();
@@ -115,6 +122,13 @@ export function Toolbar({
           </TooltipTrigger>
           <TooltipContent>{view === "source" ? "Switch to rendered view (⌘/)" : "Switch to source view (⌘/)"}</TooltipContent>
         </Tooltip>
+        {filePath && (
+          <ProblemsMenu
+            count={problemsCount}
+            diagnostics={problems}
+            onSelect={onSelectProblem}
+          />
+        )}
         <div className="truncate text-xs text-muted-foreground">{filePath ?? "No file open"}</div>
       </div>
       <div className="flex items-center gap-1">

@@ -13,6 +13,7 @@ import { TableOfContents } from "@/components/TableOfContents";
 import { Toolbar } from "@/components/Toolbar";
 import { CommandPalette } from "@/components/CommandPalette";
 import { UnsavedChangesDialog } from "@/components/UnsavedChangesDialog";
+import { DiffDialog } from "@/components/DiffDialog";
 import {
   tauri,
   onCliTarget,
@@ -21,10 +22,12 @@ import {
   onMenuAction,
   type AnnotatedFolder,
   type MenuAction,
+  type Diagnostic,
 } from "@/lib/tauri";
 import { folderForPath, pickAndAddFolder } from "@/lib/folders";
 import { buildStandaloneHtml, collectExport } from "@/lib/exportHtml";
 import { replaceLines, toggleTaskAt } from "@/lib/sourceEdit";
+import { DebouncedLint, runLintFor } from "@/lib/lint";
 import {
   createInitialState,
   reduce,
@@ -35,6 +38,8 @@ import {
   type TabState,
 } from "@/lib/workspace";
 import { cn } from "@/lib/utils";
+
+type DiffContext = { tabId: string; a: string; b: string; title: string };
 
 const WELCOME = `# Welcome to Marky
 
@@ -72,6 +77,7 @@ function AppShell() {
     zoomIn, zoomOut, zoomReset,
     sidebarLeftWidth, sidebarRightWidth,
     setSidebarWidth, resetSidebarWidth,
+    lintEnabled,
   } = usePreferences();
   const { resolved: resolvedTheme } = useTheme();
 
@@ -116,16 +122,27 @@ function AppShell() {
   }, [refreshFolders]);
 
   // Re-read open files when they change on disk.
+  //
+  // - Equal to `savedSource` → ignore (covers own-save echo).
+  // - Dirty tab → DISK_CONFLICT (don't overwrite user's edits).
+  // - Clean tab → DISK_RELOADED (auto-overwrite `source`/`savedSource`,
+  //   record `previous` so the user can Restore).
   useEffect(() => {
     const off = onFileChanged(async (paths) => {
       for (const tab of Object.values(state.tabs)) {
-        if (tab.filePath && paths.includes(tab.filePath)) {
-          try {
-            const text = await tauri.readFile(tab.filePath);
-            dispatch({ type: "UPDATE_TAB_SOURCE", tabId: tab.id, source: text });
-          } catch {
-            // File may have been deleted; ignore
-          }
+        if (!tab.filePath || !paths.includes(tab.filePath)) continue;
+        let text: string;
+        try {
+          text = await tauri.readFile(tab.filePath);
+        } catch {
+          // File may have been deleted; ignore
+          continue;
+        }
+        if (text === tab.savedSource) continue;
+        if (isDirty(tab)) {
+          dispatch({ type: "DISK_CONFLICT", tabId: tab.id, disk: text });
+        } else {
+          dispatch({ type: "DISK_RELOADED", tabId: tab.id, source: text, previous: tab.source });
         }
       }
     });
@@ -227,6 +244,42 @@ function AppShell() {
 
   // --- Save / discard / mode -------------------------------------------------
 
+  // ---- Lint lifecycle helpers ---------------------------------------------
+  //
+  // These are defined before `saveTab`/`commitBlock` etc. because each of
+  // those fires lint as a side effect of its main work.
+
+  const debouncedLintRef = useRef<DebouncedLint | null>(null);
+  if (debouncedLintRef.current === null) {
+    debouncedLintRef.current = new DebouncedLint();
+  }
+
+  const lintTab = useCallback(async (tab: TabState) => {
+    if (!tab.filePath || !lintEnabled) {
+      dispatch({ type: "SET_DIAGNOSTICS", tabId: tab.id, diagnostics: [] });
+      return;
+    }
+    try {
+      const diags = await runLintFor(tab);
+      dispatch({ type: "SET_DIAGNOSTICS", tabId: tab.id, diagnostics: diags });
+    } catch {
+      // lint failure shouldn't break editing — silently drop.
+    }
+  }, [lintEnabled]);
+
+  // Schedule a debounced lint run for the tab's current source. Used by
+  // Source view typing and on lintEnabled flip.
+  const scheduleLint = useCallback((tab: TabState) => {
+    if (!tab.filePath) return;
+    if (!lintEnabled) {
+      dispatch({ type: "SET_DIAGNOSTICS", tabId: tab.id, diagnostics: [] });
+      return;
+    }
+    debouncedLintRef.current?.schedule(tab.id, tab, (diags) => {
+      dispatch({ type: "SET_DIAGNOSTICS", tabId: tab.id, diagnostics: diags });
+    });
+  }, [lintEnabled]);
+
   const saveTab = useCallback(async (tab: TabState) => {
     if (!tab.filePath || tab.savedSource === undefined) return;
     if (tab.source === tab.savedSource) return;
@@ -234,6 +287,11 @@ function AppShell() {
       const outcome = await tauri.writeFile(tab.filePath, tab.source, tab.savedSource);
       if (outcome.kind === "saved") {
         dispatch({ type: "SAVED", tabId: tab.id, savedSource: tab.source });
+        // Re-lint the post-save content so the badge updates if the save
+        // landed different diagnostics.
+        if (lintEnabled) {
+          void lintTab({ ...tab, source: tab.source });
+        }
       } else {
         // Conflict: surface the dirty-tab banner via reducer. The banner UI is
         // built by #016; for now just log and leave the tab dirty.
@@ -243,7 +301,7 @@ function AppShell() {
     } catch (err) {
       console.error("save failed", err);
     }
-  }, []);
+  }, [lintEnabled, lintTab]);
 
   const discardTab = useCallback(async (tab: TabState) => {
     if (!tab.filePath) return;
@@ -254,6 +312,68 @@ function AppShell() {
       dispatch({ type: "DISMISS_NOTICE", tabId: tab.id });
     } catch (err) {
       console.error("discard failed", err);
+    }
+  }, []);
+
+  // --- Disk-change banner -------------------------------------------------
+
+  const [diff, setDiff] = useState<DiffContext | null>(null);
+
+  const handleShowChangesFor = useCallback((tab: TabState) => {
+    const notice = tab.diskNotice;
+    if (!notice) return;
+    if (notice.kind === "reloaded") {
+      setDiff({
+        tabId: tab.id,
+        a: notice.previous,
+        b: tab.source,
+        title: "Show changes",
+      });
+    } else {
+      setDiff({
+        tabId: tab.id,
+        a: tab.source,
+        b: notice.disk,
+        title: "Show changes",
+      });
+    }
+  }, []);
+
+  const handleRestorePrevious = useCallback((tab: TabState) => {
+    dispatch({ type: "RESTORE_PREVIOUS", tabId: tab.id });
+  }, []);
+
+  const handleKeepMine = useCallback((tab: TabState) => {
+    if (!tab.diskNotice || tab.diskNotice.kind !== "conflict") return;
+    dispatch({ type: "KEEP_MINE", tabId: tab.id, disk: tab.diskNotice.disk });
+  }, []);
+
+  const handleReloadFromDisk = useCallback((tab: TabState) => {
+    void discardTab(tab);
+  }, [discardTab]);
+
+  const handleDismissNotice = useCallback((tab: TabState) => {
+    dispatch({ type: "DISMISS_NOTICE", tabId: tab.id });
+  }, []);
+
+  const handleMerge = useCallback(async (tab: TabState) => {
+    if (!tab.diskNotice || tab.diskNotice.kind !== "conflict") return;
+    const base = tab.savedSource ?? "";
+    try {
+      const result = await tauri.mergeText(base, tab.source, tab.diskNotice.disk);
+      if (!result.conflicts) {
+        dispatch({ type: "APPLY_MERGE", tabId: tab.id, merged: result.merged });
+      } else {
+        // Conflicts: drop markers into source, switch to Source view, then
+        // dispatch APPLY_MERGE so savedSource = disk and the notice clears.
+        // The tab stays dirty with conflict markers — exactly what the plan
+        // requires so ⌘S writes the user's resolution back.
+        dispatch({ type: "UPDATE_TAB_SOURCE", tabId: tab.id, source: result.merged });
+        dispatch({ type: "SET_VIEW", tabId: tab.id, view: "source" });
+        dispatch({ type: "APPLY_MERGE", tabId: tab.id, merged: result.merged });
+      }
+    } catch (err) {
+      console.error("merge failed", err);
     }
   }, []);
 
@@ -277,15 +397,18 @@ function AppShell() {
     dispatch({ type: "SET_VIEW", tabId: tab.id, view: nextView });
   }, [activeTab]);
 
-  // Block-edit: splice new text into the tab's source and commit.
+  // Block-edit: splice new text into the tab's source and commit, then re-lint.
   const commitBlock = useCallback(
     (tabId: string, start: number, end: number, text: string) => {
       const tab = state.tabs[tabId];
       if (!tab) return;
       const next = replaceLines(tab.source, start, end, text);
       dispatch({ type: "COMMIT_EDIT", tabId, source: next });
+      if (lintEnabled) {
+        void lintTab({ ...tab, source: next });
+      }
     },
-    [state.tabs],
+    [state.tabs, lintTab, lintEnabled],
   );
 
   // Task-list checkbox toggle: just splice the line.
@@ -302,10 +425,36 @@ function AppShell() {
   );
 
   // Source-view typing: update source immediately (no commit into history;
-  // history is for block commits only).
+  // history is for block commits only). Also schedules a debounced lint run.
   const sourceEdit = useCallback((tabId: string, source: string) => {
     dispatch({ type: "UPDATE_TAB_SOURCE", tabId, source });
-  }, []);
+    const tab = state.tabs[tabId];
+    if (tab) {
+      scheduleLint({ ...tab, source });
+    }
+  }, [state.tabs, scheduleLint]);
+
+  // Lint on open: any tab with a filePath but no diagnostics yet gets a
+  // first-pass run. Tracks `state.tabs` keys so newly opened files trigger
+  // here without us having to plumb the schedule call through openFile.
+  // Also re-runs on lintEnabled toggle so the badge matches the setting.
+  const seenLintedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!lintEnabled) return;
+    for (const tab of Object.values(state.tabs)) {
+      if (!tab.filePath) continue;
+      // Force-clear so the badge doesn't lag the toggle.
+      dispatch({ type: "SET_DIAGNOSTICS", tabId: tab.id, diagnostics: [] });
+      scheduleLint(tab);
+      seenLintedRef.current.add(tab.id);
+    }
+    // Clean up for closed tabs so a later re-open re-runs.
+    const live = new Set(Object.keys(state.tabs));
+    for (const id of Array.from(seenLintedRef.current)) {
+      if (!live.has(id)) seenLintedRef.current.delete(id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.tabs, lintEnabled]);
 
   const tryCloseTab = useCallback((tabId: string, paneId: string) => {
     const tab = state.tabs[tabId];
@@ -338,6 +487,40 @@ function AppShell() {
     if (!activeTab) return;
     await discardTab(activeTab);
   }, [activeTab, discardTab]);
+
+  // Navigate the active tab to a diagnostic. In rendered mode we scroll the
+  // matching block into view; in source mode we just scroll — the editor's
+  // own diagnostic gutter marks the line.
+  const selectProblem = useCallback((diag: Diagnostic) => {
+    const tab = activeTab;
+    if (!tab) return;
+    if (tab.view === "source") {
+      // Find the editor host. The SourceView owns its own scroll; a quick
+      // approximation is to scroll the pane article element to the right line.
+      const pane = document.querySelector<HTMLElement>(
+        `[data-pane-id="${cssEscape(state.activePaneId)}"]`
+      );
+      const scroller = pane?.querySelector<HTMLElement>(".cm-scroller");
+      if (scroller) {
+        scroller.scrollTop = Math.max(0, (diag.line - 1) * 20);
+      }
+    } else {
+      const pane = document.querySelector<HTMLElement>(
+        `[data-pane-id="${cssEscape(state.activePaneId)}"]`
+      );
+      const scroller = pane?.querySelector<HTMLElement>(".markdown-body")?.parentElement;
+      if (!scroller) return;
+      const blocks = pane?.querySelectorAll<HTMLElement>("[data-source-map]");
+      for (const el of Array.from(blocks ?? [])) {
+        const raw = el.getAttribute("data-source-map");
+        const [s, e] = (raw ?? "").split(",").map((n) => Number.parseInt(n, 10));
+        if (Number.isFinite(s) && Number.isFinite(e) && diag.line >= s && diag.line <= e) {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+          return;
+        }
+      }
+    }
+  }, [activeTab, state.activePaneId]);
 
   // --- Pending prompt handlers ---------------------------------------------
 
@@ -554,6 +737,7 @@ function AppShell() {
 
   const renderPane = (paneId: string) => {
     const pane = state.panes.find((p) => p.id === paneId)!;
+    const activeTabForPane = pane.activeTabId ? state.tabs[pane.activeTabId] : undefined;
     return (
       <Pane
         key={pane.id}
@@ -568,6 +752,12 @@ function AppShell() {
         onCommitBlock={commitBlock}
         onToggleCheckbox={toggleCheckbox}
         onSourceEdit={sourceEdit}
+        onShowChanges={activeTabForPane ? () => handleShowChangesFor(activeTabForPane) : undefined}
+        onRestorePrevious={activeTabForPane ? () => handleRestorePrevious(activeTabForPane) : undefined}
+        onReloadFromDisk={activeTabForPane ? () => handleReloadFromDisk(activeTabForPane) : undefined}
+        onKeepMine={activeTabForPane ? () => handleKeepMine(activeTabForPane) : undefined}
+        onMerge={activeTabForPane ? () => void handleMerge(activeTabForPane) : undefined}
+        onDismissNotice={activeTabForPane ? () => handleDismissNotice(activeTabForPane) : undefined}
       />
     );
   };
@@ -610,6 +800,9 @@ function AppShell() {
           dirty={activeDirty}
           onSave={saveActiveTab}
           onDiscard={discardActiveTab}
+          problemsCount={activeTab?.diagnostics?.length ?? 0}
+          problems={activeTab?.diagnostics ?? []}
+          onSelectProblem={selectProblem}
         />
         <div className="flex min-h-0 flex-1 print:block">
           <main className="min-w-0 flex-1">
@@ -665,6 +858,13 @@ function AppShell() {
         onSave={() => resolvePrompt("save")}
         onDiscard={() => resolvePrompt("discard")}
         onCancel={() => resolvePrompt("cancel")}
+      />
+      <DiffDialog
+        open={diff !== null}
+        onOpenChange={(o) => { if (!o) setDiff(null); }}
+        title={diff?.title ?? "Show changes"}
+        original={diff?.a ?? ""}
+        modified={diff?.b ?? ""}
       />
     </div>
   );
