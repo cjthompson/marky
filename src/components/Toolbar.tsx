@@ -27,6 +27,8 @@ interface Props {
   onFind: () => void;
   mode: "read" | "edit";
   onToggleMode: () => void;
+  view: "rendered" | "source";
+  onToggleView: () => void;
   dirty: boolean;
   onSave: () => void;
   onDiscard: () => void;
@@ -41,6 +43,8 @@ export function Toolbar({
   onFind,
   mode,
   onToggleMode,
+  view,
+  onToggleView,
   dirty,
   onSave,
   onDiscard,
@@ -97,6 +101,19 @@ export function Toolbar({
             </Button>
           </TooltipTrigger>
           <TooltipContent>Discard unsaved changes and reload from disk</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant={view === "source" ? "default" : "ghost"}
+              size="sm"
+              className="h-7 gap-1.5 px-2 text-xs"
+              onClick={onToggleView}
+            >
+              {view === "source" ? "Source" : "Rendered"}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{view === "source" ? "Switch to rendered view (⌘/)" : "Switch to source view (⌘/)"}</TooltipContent>
         </Tooltip>
         <div className="truncate text-xs text-muted-foreground">{filePath ?? "No file open"}</div>
       </div>

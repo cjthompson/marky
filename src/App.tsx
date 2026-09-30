@@ -22,6 +22,7 @@ import {
   type MenuAction,
 } from "@/lib/tauri";
 import { pickAndAddFolder } from "@/lib/folders";
+import { replaceLines, toggleTaskAt } from "@/lib/sourceEdit";
 import {
   createInitialState,
   reduce,
@@ -236,6 +237,43 @@ function AppShell() {
     dispatch({ type: "SET_MODE", tabId: tab.id, mode: nextMode });
   }, [activeTab]);
 
+  const toggleView = useCallback(() => {
+    const tab = activeTab;
+    if (!tab) return;
+    const nextView = tab.view === "rendered" ? "source" : "rendered";
+    dispatch({ type: "SET_VIEW", tabId: tab.id, view: nextView });
+  }, [activeTab]);
+
+  // Block-edit: splice new text into the tab's source and commit.
+  const commitBlock = useCallback(
+    (tabId: string, start: number, end: number, text: string) => {
+      const tab = state.tabs[tabId];
+      if (!tab) return;
+      const next = replaceLines(tab.source, start, end, text);
+      dispatch({ type: "COMMIT_EDIT", tabId, source: next });
+    },
+    [state.tabs],
+  );
+
+  // Task-list checkbox toggle: just splice the line.
+  const toggleCheckbox = useCallback(
+    (tabId: string, line: number) => {
+      const tab = state.tabs[tabId];
+      if (!tab) return;
+      const next = toggleTaskAt(tab.source, line);
+      if (next !== tab.source) {
+        dispatch({ type: "COMMIT_EDIT", tabId, source: next });
+      }
+    },
+    [state.tabs],
+  );
+
+  // Source-view typing: update source immediately (no commit into history;
+  // history is for block commits only).
+  const sourceEdit = useCallback((tabId: string, source: string) => {
+    dispatch({ type: "UPDATE_TAB_SOURCE", tabId, source });
+  }, []);
+
   const tryCloseTab = useCallback((tabId: string, paneId: string) => {
     const tab = state.tabs[tabId];
     if (tab && isDirty(tab)) {
@@ -383,6 +421,9 @@ function AppShell() {
       case "edit-mode":
         toggleMode();
         break;
+      case "source-view":
+        toggleView();
+        break;
       case "undo":
         if (activeTab) dispatch({ type: "UNDO", tabId: activeTab.id });
         break;
@@ -449,6 +490,9 @@ function AppShell() {
         onFocusPane={() => dispatch({ type: "FOCUS_PANE", paneId: pane.id })}
         searchOpen={searchPaneId === pane.id}
         onSearchClose={() => setSearchPaneId(null)}
+        onCommitBlock={commitBlock}
+        onToggleCheckbox={toggleCheckbox}
+        onSourceEdit={sourceEdit}
       />
     );
   };
@@ -485,6 +529,8 @@ function AppShell() {
           onFind={() => setSearchPaneId(state.activePaneId)}
           mode={activeTab?.mode ?? "read"}
           onToggleMode={toggleMode}
+          view={activeTab?.view ?? "rendered"}
+          onToggleView={toggleView}
           dirty={activeDirty}
           onSave={saveActiveTab}
           onDiscard={discardActiveTab}

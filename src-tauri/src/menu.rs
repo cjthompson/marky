@@ -237,6 +237,9 @@ fn view_menu(app: &AppHandle) -> tauri::Result<Submenu<Wry>> {
     let edit_mode = MenuItemBuilder::with_id("edit-mode", "Edit Mode")
         .accelerator("CmdOrCtrl+E")
         .build(app)?;
+    let source_view = MenuItemBuilder::with_id("source-view", "Source View")
+        .accelerator("CmdOrCtrl+/")
+        .build(app)?;
     let split_right = MenuItemBuilder::with_id("split-right", "Split Right")
         .accelerator("CmdOrCtrl+\\")
         .build(app)?;
@@ -258,6 +261,7 @@ fn view_menu(app: &AppHandle) -> tauri::Result<Submenu<Wry>> {
         .item(&command_palette)
         .separator()
         .item(&edit_mode)
+        .item(&source_view)
         .separator()
         .item(&split_right)
         .item(&split_down)

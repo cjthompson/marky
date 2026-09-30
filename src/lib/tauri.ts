@@ -110,6 +110,7 @@ export type MenuAction =
   | "save"
   | "discard-changes"
   | "edit-mode"
+  | "source-view"
   | "undo"
   | "redo";
 
