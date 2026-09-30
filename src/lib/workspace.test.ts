@@ -227,4 +227,43 @@ describe("edit-mode reducer transitions", () => {
     s = reduce(s, { type: "SET_DIAGNOSTICS", tabId, diagnostics: diags });
     expect(s.tabs[tabId].diagnostics).toEqual(diags);
   });
+
+  it("DISK_RELOADED twice keeps the original previous (does not overwrite with in-between source)", () => {
+    let s = createInitialState("w");
+    s = open(s, "/a.md", "v1");
+    const tabId = getActiveTab(s)!.id;
+    s = reduce(s, { type: "DISK_RELOADED", tabId, source: "v2", previous: "v1" });
+    expect(s.tabs[tabId].diskNotice).toEqual({ kind: "reloaded", previous: "v1" });
+    // Second reload — caller passes the current `source` ("v2") as `previous`.
+    // The reducer must ignore that and keep the original "v1" so Restore can
+    // bring back the pre-first-reload content.
+    s = reduce(s, { type: "DISK_RELOADED", tabId, source: "v3", previous: "v2" });
+    expect(s.tabs[tabId].source).toBe("v3");
+    expect(s.tabs[tabId].savedSource).toBe("v3");
+    expect(s.tabs[tabId].diskNotice).toEqual({ kind: "reloaded", previous: "v1" });
+  });
+
+  it("KEEP_MINE on a clean tab still works without a prior COMMIT_EDIT", () => {
+    let s = createInitialState("w");
+    s = open(s, "/a.md", "v1");
+    const tabId = getActiveTab(s)!.id;
+    s = reduce(s, { type: "DISK_CONFLICT", tabId, disk: "from-disk" });
+    // Tab is still clean (source === savedSource === "v1"); the user picks
+    // Keep mine so the next ⌘S will overwrite disk without a conflict.
+    expect(isDirty(s.tabs[tabId])).toBe(false);
+    s = reduce(s, { type: "KEEP_MINE", tabId, disk: "from-disk" });
+    expect(s.tabs[tabId].source).toBe("v1");
+    expect(s.tabs[tabId].savedSource).toBe("from-disk");
+    expect(s.tabs[tabId].diskNotice).toBeUndefined();
+  });
+
+  it("APPLY_MERGE on a reloaded notice is a no-op", () => {
+    let s = createInitialState("w");
+    s = open(s, "/a.md", "v1");
+    const tabId = getActiveTab(s)!.id;
+    s = reduce(s, { type: "DISK_RELOADED", tabId, source: "v2", previous: "v1" });
+    const before = s.tabs[tabId];
+    s = reduce(s, { type: "APPLY_MERGE", tabId, merged: "merged" });
+    expect(s.tabs[tabId]).toEqual(before);
+  });
 });

@@ -13,6 +13,7 @@ import { TableOfContents } from "@/components/TableOfContents";
 import { Toolbar } from "@/components/Toolbar";
 import { CommandPalette } from "@/components/CommandPalette";
 import { UnsavedChangesDialog } from "@/components/UnsavedChangesDialog";
+import { DiffDialog } from "@/components/DiffDialog";
 import {
   tauri,
   onCliTarget,
@@ -35,6 +36,8 @@ import {
   type TabState,
 } from "@/lib/workspace";
 import { cn } from "@/lib/utils";
+
+type DiffContext = { tabId: string; a: string; b: string; title: string };
 
 const WELCOME = `# Welcome to Marky
 
@@ -116,16 +119,27 @@ function AppShell() {
   }, [refreshFolders]);
 
   // Re-read open files when they change on disk.
+  //
+  // - Equal to `savedSource` → ignore (covers own-save echo).
+  // - Dirty tab → DISK_CONFLICT (don't overwrite user's edits).
+  // - Clean tab → DISK_RELOADED (auto-overwrite `source`/`savedSource`,
+  //   record `previous` so the user can Restore).
   useEffect(() => {
     const off = onFileChanged(async (paths) => {
       for (const tab of Object.values(state.tabs)) {
-        if (tab.filePath && paths.includes(tab.filePath)) {
-          try {
-            const text = await tauri.readFile(tab.filePath);
-            dispatch({ type: "UPDATE_TAB_SOURCE", tabId: tab.id, source: text });
-          } catch {
-            // File may have been deleted; ignore
-          }
+        if (!tab.filePath || !paths.includes(tab.filePath)) continue;
+        let text: string;
+        try {
+          text = await tauri.readFile(tab.filePath);
+        } catch {
+          // File may have been deleted; ignore
+          continue;
+        }
+        if (text === tab.savedSource) continue;
+        if (isDirty(tab)) {
+          dispatch({ type: "DISK_CONFLICT", tabId: tab.id, disk: text });
+        } else {
+          dispatch({ type: "DISK_RELOADED", tabId: tab.id, source: text, previous: tab.source });
         }
       }
     });
@@ -254,6 +268,68 @@ function AppShell() {
       dispatch({ type: "DISMISS_NOTICE", tabId: tab.id });
     } catch (err) {
       console.error("discard failed", err);
+    }
+  }, []);
+
+  // --- Disk-change banner -------------------------------------------------
+
+  const [diff, setDiff] = useState<DiffContext | null>(null);
+
+  const handleShowChangesFor = useCallback((tab: TabState) => {
+    const notice = tab.diskNotice;
+    if (!notice) return;
+    if (notice.kind === "reloaded") {
+      setDiff({
+        tabId: tab.id,
+        a: notice.previous,
+        b: tab.source,
+        title: "Show changes",
+      });
+    } else {
+      setDiff({
+        tabId: tab.id,
+        a: tab.source,
+        b: notice.disk,
+        title: "Show changes",
+      });
+    }
+  }, []);
+
+  const handleRestorePrevious = useCallback((tab: TabState) => {
+    dispatch({ type: "RESTORE_PREVIOUS", tabId: tab.id });
+  }, []);
+
+  const handleKeepMine = useCallback((tab: TabState) => {
+    if (!tab.diskNotice || tab.diskNotice.kind !== "conflict") return;
+    dispatch({ type: "KEEP_MINE", tabId: tab.id, disk: tab.diskNotice.disk });
+  }, []);
+
+  const handleReloadFromDisk = useCallback((tab: TabState) => {
+    void discardTab(tab);
+  }, [discardTab]);
+
+  const handleDismissNotice = useCallback((tab: TabState) => {
+    dispatch({ type: "DISMISS_NOTICE", tabId: tab.id });
+  }, []);
+
+  const handleMerge = useCallback(async (tab: TabState) => {
+    if (!tab.diskNotice || tab.diskNotice.kind !== "conflict") return;
+    const base = tab.savedSource ?? "";
+    try {
+      const result = await tauri.mergeText(base, tab.source, tab.diskNotice.disk);
+      if (!result.conflicts) {
+        dispatch({ type: "APPLY_MERGE", tabId: tab.id, merged: result.merged });
+      } else {
+        // Conflicts: drop markers into source, switch to Source view, then
+        // dispatch APPLY_MERGE so savedSource = disk and the notice clears.
+        // The tab stays dirty with conflict markers — exactly what the plan
+        // requires so ⌘S writes the user's resolution back.
+        dispatch({ type: "UPDATE_TAB_SOURCE", tabId: tab.id, source: result.merged });
+        dispatch({ type: "SET_VIEW", tabId: tab.id, view: "source" });
+        dispatch({ type: "APPLY_MERGE", tabId: tab.id, merged: result.merged });
+      }
+    } catch (err) {
+      console.error("merge failed", err);
     }
   }, []);
 
@@ -546,6 +622,7 @@ function AppShell() {
 
   const renderPane = (paneId: string) => {
     const pane = state.panes.find((p) => p.id === paneId)!;
+    const activeTabForPane = pane.activeTabId ? state.tabs[pane.activeTabId] : undefined;
     return (
       <Pane
         key={pane.id}
@@ -560,6 +637,12 @@ function AppShell() {
         onCommitBlock={commitBlock}
         onToggleCheckbox={toggleCheckbox}
         onSourceEdit={sourceEdit}
+        onShowChanges={activeTabForPane ? () => handleShowChangesFor(activeTabForPane) : undefined}
+        onRestorePrevious={activeTabForPane ? () => handleRestorePrevious(activeTabForPane) : undefined}
+        onReloadFromDisk={activeTabForPane ? () => handleReloadFromDisk(activeTabForPane) : undefined}
+        onKeepMine={activeTabForPane ? () => handleKeepMine(activeTabForPane) : undefined}
+        onMerge={activeTabForPane ? () => void handleMerge(activeTabForPane) : undefined}
+        onDismissNotice={activeTabForPane ? () => handleDismissNotice(activeTabForPane) : undefined}
       />
     );
   };
@@ -657,6 +740,13 @@ function AppShell() {
         onSave={() => resolvePrompt("save")}
         onDiscard={() => resolvePrompt("discard")}
         onCancel={() => resolvePrompt("cancel")}
+      />
+      <DiffDialog
+        open={diff !== null}
+        onOpenChange={(o) => { if (!o) setDiff(null); }}
+        title={diff?.title ?? "Show changes"}
+        original={diff?.a ?? ""}
+        modified={diff?.b ?? ""}
       />
     </div>
   );

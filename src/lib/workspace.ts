@@ -362,12 +362,19 @@ export function reduce(state: WorkspaceState, action: Action): WorkspaceState {
     }
 
     case "DISK_RELOADED": {
-      return withTab(state, action.tabId, (t) => ({
-        ...t,
-        source: action.source,
-        savedSource: action.source,
-        diskNotice: { kind: "reloaded", previous: action.previous },
-      }));
+      return withTab(state, action.tabId, (t) => {
+        // If a reloaded notice is already up, keep the original `previous`
+        // so repeated disk reloads (e.g. Claude rewriting a plan) keep the
+        // pre-first-reload content for Restore until the banner is dismissed.
+        const previous =
+          t.diskNotice?.kind === "reloaded" ? t.diskNotice.previous : action.previous;
+        return {
+          ...t,
+          source: action.source,
+          savedSource: action.source,
+          diskNotice: { kind: "reloaded", previous },
+        };
+      });
     }
 
     case "DISK_CONFLICT": {
