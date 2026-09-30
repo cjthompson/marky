@@ -12,11 +12,52 @@
 
 export type SplitDirection = "horizontal" | "vertical";
 
+export type TabMode = "read" | "edit";
+export type TabView = "rendered" | "source";
+
+export interface Diagnostic {
+  line: number;
+  column: number;
+  end_line: number;
+  end_column: number;
+  rule: string;
+  message: string;
+  severity: "error" | "warning" | "info";
+  fix?: {
+    from_line: number;
+    from_col: number;
+    to_line: number;
+    to_col: number;
+    replacement: string;
+  };
+}
+
+export type DiskNotice =
+  | { kind: "reloaded"; previous: string }
+  | { kind: "conflict"; disk: string };
+
 export interface TabState {
   id: string;
   filePath?: string;
   title: string;
   source: string;
+  /** Source content last saved to disk; missing means a tab with no file. */
+  savedSource?: string;
+  mode: TabMode;
+  view: TabView;
+  /** Pre-commit source snapshots, newest at the end. Capped at 100 entries. */
+  history: string[];
+  /** Redo stack. */
+  future: string[];
+  /** Disk-reload notice awaiting user acknowledgement. */
+  diskNotice?: DiskNotice;
+  /** Lint diagnostics for the current source. */
+  diagnostics?: Diagnostic[];
+}
+
+export function isDirty(tab: TabState): boolean {
+  if (!tab.filePath) return false;
+  return tab.source !== tab.savedSource;
 }
 
 export interface PaneState {
@@ -42,16 +83,38 @@ export type Action =
   | { type: "SWITCH_TAB"; paneId: string; tabId: string }
   | { type: "FOCUS_PANE"; paneId: string }
   | { type: "SPLIT"; direction: SplitDirection }
-  | { type: "CLOSE_SPLIT" };
+  | { type: "CLOSE_SPLIT" }
+  | { type: "COMMIT_EDIT"; tabId: string; source: string }
+  | { type: "SAVED"; tabId: string; savedSource: string }
+  | { type: "UNDO"; tabId: string }
+  | { type: "REDO"; tabId: string }
+  | { type: "SET_MODE"; tabId: string; mode: TabMode }
+  | { type: "SET_VIEW"; tabId: string; view: TabView }
+  | { type: "DISK_RELOADED"; tabId: string; source: string; previous: string }
+  | { type: "DISK_CONFLICT"; tabId: string; disk: string }
+  | { type: "RESTORE_PREVIOUS"; tabId: string }
+  | { type: "KEEP_MINE"; tabId: string; disk: string }
+  | { type: "APPLY_MERGE"; tabId: string; merged: string }
+  | { type: "DISMISS_NOTICE"; tabId: string }
+  | { type: "SET_DIAGNOSTICS"; tabId: string; diagnostics: Diagnostic[] };
 
 const WELCOME_TITLE = "Welcome";
+const HISTORY_CAP = 100;
 
 export function createInitialState(welcomeSource: string): WorkspaceState {
   const tabId = "t0";
   const paneId = "p0";
   return {
     tabs: {
-      [tabId]: { id: tabId, title: WELCOME_TITLE, source: welcomeSource },
+      [tabId]: {
+        id: tabId,
+        title: WELCOME_TITLE,
+        source: welcomeSource,
+        mode: "read",
+        view: "rendered",
+        history: [],
+        future: [],
+      },
     },
     panes: [{ id: paneId, tabIds: [tabId], activeTabId: tabId }],
     activePaneId: paneId,
@@ -74,6 +137,17 @@ function findTabByPath(state: WorkspaceState, path: string): { paneId: string; t
 
 function withPane(state: WorkspaceState, paneId: string, fn: (p: PaneState) => PaneState): WorkspaceState {
   return { ...state, panes: state.panes.map((p) => (p.id === paneId ? fn(p) : p)) };
+}
+
+function withTab(state: WorkspaceState, tabId: string, fn: (t: TabState) => TabState): WorkspaceState {
+  const existing = state.tabs[tabId];
+  if (!existing) return state;
+  return { ...state, tabs: { ...state.tabs, [tabId]: fn(existing) } };
+}
+
+function pushHistory(history: string[], entry: string): string[] {
+  const next = [...history, entry];
+  return next.length > HISTORY_CAP ? next.slice(next.length - HISTORY_CAP) : next;
 }
 
 /**
@@ -114,6 +188,11 @@ export function reduce(state: WorkspaceState, action: Action): WorkspaceState {
         filePath: action.path,
         title: action.title,
         source: action.source,
+        savedSource: action.source,
+        mode: "read",
+        view: "rendered",
+        history: [],
+        future: [],
       };
       return {
         ...state,
@@ -133,7 +212,15 @@ export function reduce(state: WorkspaceState, action: Action): WorkspaceState {
         ...state,
         tabs: {
           ...state.tabs,
-          [tabId]: { id: tabId, title: WELCOME_TITLE, source: action.source },
+          [tabId]: {
+            id: tabId,
+            title: WELCOME_TITLE,
+            source: action.source,
+            mode: "read",
+            view: "rendered",
+            history: [],
+            future: [],
+          },
         },
         panes: state.panes.map((p) =>
           p.id === paneId ? { ...p, tabIds: [...p.tabIds, tabId], activeTabId: tabId } : p
@@ -221,6 +308,115 @@ export function reduce(state: WorkspaceState, action: Action): WorkspaceState {
         split: null,
         activePaneId: keep.id,
       };
+    }
+
+    case "COMMIT_EDIT": {
+      return withTab(state, action.tabId, (t) => ({
+        ...t,
+        source: action.source,
+        history: pushHistory(t.history, t.source),
+        future: [],
+      }));
+    }
+
+    case "SAVED": {
+      return withTab(state, action.tabId, (t) => ({
+        ...t,
+        savedSource: action.savedSource,
+        diskNotice: undefined,
+      }));
+    }
+
+    case "UNDO": {
+      return withTab(state, action.tabId, (t) => {
+        if (t.history.length === 0) return t;
+        const prev = t.history[t.history.length - 1];
+        return {
+          ...t,
+          source: prev,
+          history: t.history.slice(0, -1),
+          future: [...t.future, t.source],
+        };
+      });
+    }
+
+    case "REDO": {
+      return withTab(state, action.tabId, (t) => {
+        if (t.future.length === 0) return t;
+        const next = t.future[t.future.length - 1];
+        return {
+          ...t,
+          source: next,
+          history: [...t.history, t.source],
+          future: t.future.slice(0, -1),
+        };
+      });
+    }
+
+    case "SET_MODE": {
+      return withTab(state, action.tabId, (t) => ({ ...t, mode: action.mode }));
+    }
+
+    case "SET_VIEW": {
+      return withTab(state, action.tabId, (t) => ({ ...t, view: action.view }));
+    }
+
+    case "DISK_RELOADED": {
+      return withTab(state, action.tabId, (t) => ({
+        ...t,
+        source: action.source,
+        savedSource: action.source,
+        diskNotice: { kind: "reloaded", previous: action.previous },
+      }));
+    }
+
+    case "DISK_CONFLICT": {
+      return withTab(state, action.tabId, (t) => ({
+        ...t,
+        diskNotice: { kind: "conflict", disk: action.disk },
+      }));
+    }
+
+    case "RESTORE_PREVIOUS": {
+      return withTab(state, action.tabId, (t) => {
+        if (!t.diskNotice || t.diskNotice.kind !== "reloaded") return t;
+        const disk = t.savedSource ?? "";
+        return {
+          ...t,
+          source: t.diskNotice.previous,
+          savedSource: disk,
+          mode: "edit",
+          diskNotice: undefined,
+        };
+      });
+    }
+
+    case "KEEP_MINE": {
+      return withTab(state, action.tabId, (t) => ({
+        ...t,
+        savedSource: action.disk,
+        diskNotice: undefined,
+      }));
+    }
+
+    case "APPLY_MERGE": {
+      return withTab(state, action.tabId, (t) => {
+        if (!t.diskNotice || t.diskNotice.kind !== "conflict") return t;
+        return {
+          ...t,
+          source: action.merged,
+          savedSource: t.diskNotice.disk,
+          diskNotice: undefined,
+        };
+      });
+    }
+
+    case "DISMISS_NOTICE": {
+      return withTab(state, action.tabId, (t) => ({ ...t, diskNotice: undefined }));
+    }
+
+    case "SET_DIAGNOSTICS": {
+      return withTab(state, action.tabId, (t) => ({ ...t, diagnostics: action.diagnostics }));
     }
   }
 }

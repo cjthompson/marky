@@ -13,10 +13,28 @@ use commands::InitialTargetState;
 use parking_lot::Mutex;
 use registry::{FolderRegistry, SharedRegistry};
 use settings::{data_dir, Settings};
-use std::path::PathBuf;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::Manager;
 use watcher::{watch_folder, SharedWatchers, Watchers};
+
+/// Set of canonical file paths opened in this session. `write_file` only
+/// accepts writes against paths recorded here, so the front-end cannot write
+/// files it never read.
+pub struct OpenedFiles(pub Mutex<HashSet<PathBuf>>);
+
+impl OpenedFiles {
+    pub fn new() -> Self {
+        Self(Mutex::new(HashSet::new()))
+    }
+
+    pub fn record(&self, path: &Path) {
+        if let Ok(canonical) = std::fs::canonicalize(path) {
+            self.0.lock().insert(canonical);
+        }
+    }
+}
 
 /// Handle a new CLI target from either single-instance forwarding or macOS
 /// file-open events: register folders, update managed state, emit to frontend,
@@ -111,6 +129,7 @@ pub fn run() {
             app.manage(InitialTargetState(Mutex::new(initial_resolved)));
             app.manage(registry);
             app.manage(watchers);
+            app.manage(OpenedFiles::new());
 
             let (menu, handles) = menu::build(app.handle())?;
             app.set_menu(menu)?;
@@ -123,6 +142,8 @@ pub fn run() {
             commands::get_initial_target,
             commands::set_initial_target,
             commands::read_file,
+            commands::write_file,
+            commands::merge_text,
             commands::list_folders,
             commands::list_folders_grouped,
             commands::add_folder,
