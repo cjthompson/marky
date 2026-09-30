@@ -40,6 +40,13 @@ export function getHighlighter(): Promise<Highlighter> {
   return promise;
 }
 
+// Module-level render cache. Keyed by `${resolvedLang}|${theme}|${code}` so
+// that a viewer re-render of the same block returns synchronously from the
+// cache and skips the flash back to plain text. `resolvedLang` is used (not
+// the raw `lang`) so that a hit after a failed language load collapses to
+// the same `text`-fallback entry the first miss stored.
+const renderCache = new Map<string, string>();
+
 export async function highlightCode(
   code: string,
   lang: string | undefined,
@@ -56,8 +63,14 @@ export async function highlightCode(
       resolvedLang = "";
     }
   }
-  return hl.codeToHtml(code, {
-    lang: resolvedLang || "text",
+  const finalLang = resolvedLang || "text";
+  const key = `${finalLang}|${theme}|${code}`;
+  const cached = renderCache.get(key);
+  if (cached !== undefined) return cached;
+  const out = hl.codeToHtml(code, {
+    lang: finalLang,
     theme: theme === "dark" ? "github-dark" : "github-light",
   });
+  renderCache.set(key, out);
+  return out;
 }

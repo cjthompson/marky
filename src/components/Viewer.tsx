@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { Pencil } from "lucide-react";
 import { renderMarkdown } from "@/lib/markdown";
 import { highlightCode } from "@/lib/highlight";
-import { renderMermaidBlocks } from "@/lib/mermaid";
+import { renderMermaidBlocks, renderMermaidSource } from "@/lib/mermaid";
 import { attachCopyButtons } from "@/components/CodeCopyOverlay";
 import { handleCopyAsMarkdown } from "@/lib/copyAsMarkdown";
 import { BlockEditor } from "@/components/BlockEditor";
@@ -66,6 +66,50 @@ export function Viewer({
     setEditing(null);
   }, [source]);
 
+  // Sync pass before paint: apply any cache hits so the article never flashes
+  // plain text. `highlightCode` and `renderMermaidSource` resolve immediately
+  // on a hit, so awaiting them here is cheap; misses fall through to the async
+  // effect below.
+  React.useLayoutEffect(() => {
+    const root = ref.current;
+    if (!root) return;
+
+    const codeBlocks = root.querySelectorAll<HTMLElement>("pre > code[class*='language-']");
+    for (const code of Array.from(codeBlocks)) {
+      const cls = code.className;
+      const match = cls.match(/language-([\w+-]+)/);
+      const lang = match?.[1];
+      const text = code.textContent || "";
+      // Synchronous on cache hits, falls through on a miss.
+      void highlightCode(text, lang, resolved).then((highlighted) => {
+        const pre = code.parentElement;
+        if (!pre || !pre.isConnected || !pre.parentElement) return;
+        const tpl = document.createElement("template");
+        tpl.innerHTML = highlighted.trim();
+        const replacement = tpl.content.firstElementChild;
+        if (!replacement) return;
+        const sourceMap = pre.getAttribute("data-source-map");
+        if (sourceMap) replacement.setAttribute("data-source-map", sourceMap);
+        pre.replaceWith(replacement);
+      });
+    }
+
+    const mermaidBlocks = root.querySelectorAll<HTMLPreElement>("pre.mermaid-pending");
+    for (const pre of Array.from(mermaidBlocks)) {
+      const source = pre.textContent || "";
+      void renderMermaidSource(source, resolved).then((svg) => {
+        if (!pre.isConnected || !pre.parentElement) return;
+        const wrapper = document.createElement("div");
+        wrapper.className = "mermaid-block";
+        wrapper.innerHTML = svg;
+        const sourceMap = pre.getAttribute("data-source-map");
+        if (sourceMap) wrapper.setAttribute("data-source-map", sourceMap);
+        pre.replaceWith(wrapper);
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [html, resolved]);
+
   React.useEffect(() => {
     const root = ref.current;
     if (!root) return;
@@ -74,6 +118,9 @@ export function Viewer({
     (async () => {
       const codeBlocks = root.querySelectorAll<HTMLElement>("pre > code[class*='language-']");
       for (const code of Array.from(codeBlocks)) {
+        // Skip blocks already replaced by the sync pass — those have no
+        // remaining plain-text sibling.
+        if (!code.isConnected || !code.parentElement) continue;
         const cls = code.className;
         const match = cls.match(/language-([\w+-]+)/);
         const lang = match?.[1];
