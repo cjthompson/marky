@@ -267,6 +267,20 @@ pub fn load_preferences(registry: State<'_, SharedRegistry>) -> PreferencesPaylo
 }
 
 #[tauri::command]
+pub fn set_menu_state(
+    has_file: bool,
+    has_folder: bool,
+    handles: State<'_, crate::menu::MenuHandles>,
+) {
+    for item in &handles.file_items {
+        let _ = item.set_enabled(has_file);
+    }
+    for item in &handles.folder_items {
+        let _ = item.set_enabled(has_folder);
+    }
+}
+
+#[tauri::command]
 pub async fn open_with(app: AppHandle, path: String) -> AppResult<()> {
     #[cfg(target_os = "macos")]
     {

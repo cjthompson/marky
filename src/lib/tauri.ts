@@ -57,6 +57,8 @@ export const tauri = {
   savePreferences: (prefs: PreferencesPayload) =>
     invoke<void>("save_preferences", { prefs }),
   loadPreferences: () => invoke<PreferencesPayload>("load_preferences"),
+  setMenuState: (hasFile: boolean, hasFolder: boolean) =>
+    invoke<void>("set_menu_state", { hasFile, hasFolder }),
   openWith: (path: string) => invoke<void>("open_with", { path }),
   exportHtml: (html: string, suggestedName: string) =>
     invoke<string | null>("export_html", { html, suggestedName }),

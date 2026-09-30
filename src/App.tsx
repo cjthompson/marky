@@ -544,6 +544,14 @@ function AppShell() {
     };
   }, []);
 
+  useEffect(() => {
+    const hasFile = activeTab?.filePath !== undefined;
+    const hasFolder = folderForPath(folders, activeTab?.filePath) !== null;
+    tauri.setMenuState(hasFile, hasFolder).catch((err) => {
+      console.error("failed to update menu state", err);
+    });
+  }, [activeTab?.filePath, folders]);
+
   const renderPane = (paneId: string) => {
     const pane = state.panes.find((p) => p.id === paneId)!;
     return (

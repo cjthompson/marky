@@ -18,9 +18,7 @@ use tauri_plugin_opener::OpenerExt;
 /// toggle them without rebuilding the whole menu. The recent-files/folders
 /// submenus are populated by #003.
 pub struct MenuHandles {
-    #[allow(dead_code)]
     pub file_items: Vec<MenuItem<Wry>>,
-    #[allow(dead_code)]
     pub folder_items: Vec<MenuItem<Wry>>,
     #[allow(dead_code)]
     pub recent_files: Submenu<Wry>,

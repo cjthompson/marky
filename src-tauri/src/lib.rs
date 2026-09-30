@@ -158,6 +158,7 @@ pub fn run() {
             commands::save_theme,
             commands::save_preferences,
             commands::load_preferences,
+            commands::set_menu_state,
             commands::open_with,
             commands::export_html,
             commands::export_markdown,
