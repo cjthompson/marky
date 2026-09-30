@@ -10,27 +10,17 @@
  *     `closeEmptyPane()` is invoked at the end of every action.
  */
 
+import type { Diagnostic as TauriDiagnostic } from "@/lib/tauri";
+
 export type SplitDirection = "horizontal" | "vertical";
 
 export type TabMode = "read" | "edit";
 export type TabView = "rendered" | "source";
 
-export interface Diagnostic {
-  line: number;
-  column: number;
-  end_line: number;
-  end_column: number;
-  rule: string;
-  message: string;
-  severity: "error" | "warning" | "info";
-  fix?: {
-    from_line: number;
-    from_col: number;
-    to_line: number;
-    to_col: number;
-    replacement: string;
-  };
-}
+// The IPC type lives in `tauri.ts` so the Rust and TS shapes can't drift.
+// Re-export it here so existing imports of `Diagnostic` from `workspace`
+// continue to work.
+export type Diagnostic = TauriDiagnostic;
 
 export type DiskNotice =
   | { kind: "reloaded"; previous: string }

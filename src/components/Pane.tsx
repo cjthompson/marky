@@ -90,6 +90,7 @@ export function Pane({
               source={activeTab.source}
               editable={activeTab.mode === "edit" && activeTab.filePath !== undefined}
               onSourceChange={onSourceEdit ? (next) => onSourceEdit(activeTab.id, next) : undefined}
+              diagnostics={activeTab.diagnostics ?? []}
             />
           ) : (
             <Viewer
@@ -101,6 +102,7 @@ export function Pane({
               mode={activeTab.mode}
               onCommitBlock={onCommitBlock ? (s, e, t) => onCommitBlock(activeTab.id, s, e, t) : undefined}
               onToggleCheckbox={onToggleCheckbox ? (l) => onToggleCheckbox(activeTab.id, l) : undefined}
+              diagnostics={activeTab.diagnostics ?? []}
             />
           )
         ) : (

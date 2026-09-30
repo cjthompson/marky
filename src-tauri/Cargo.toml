@@ -30,6 +30,9 @@ parking_lot = "0.12"
 dirs = "5"
 atomic-write-file = "0.3"
 diffy = "0.5"
+rumdl = "=0.2.78"
+toml = "0.8"
+yaml-rust2 = "0.13"
 
 [dev-dependencies]
 tempfile = "3"

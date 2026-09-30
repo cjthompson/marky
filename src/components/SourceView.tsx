@@ -2,6 +2,8 @@ import { useEffect, useRef } from "react";
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { extensionsForSource } from "@/lib/codemirror";
+import { lintDiagnosticsStatic } from "@/lib/lint";
+import type { Diagnostic } from "@/lib/workspace";
 
 interface Props {
   source: string;
@@ -9,6 +11,8 @@ interface Props {
   onSourceChange?: (next: string) => void;
   /** Set true when the user is in Edit mode; false in Read mode. */
   editable: boolean;
+  /** Lint diagnostics for the current source (1-indexed line/col). */
+  diagnostics?: Diagnostic[];
 }
 
 /**
@@ -16,9 +20,11 @@ interface Props {
  *
  * Read mode shows the source as a non-editable view with markdown
  * highlighting and folding; Edit mode lets the user type and pushes every
- * change up through `onSourceChange`. Lint diagnostics are wired in #018.
+ * change up through `onSourceChange`. Lint diagnostics surface as gutter
+ * marks, underlines, and hover messages via `@codemirror/lint`. Quick-fix
+ * actions appear when rumdl attaches a `fix` payload.
  */
-export function SourceView({ source, onSourceChange, editable }: Props) {
+export function SourceView({ source, onSourceChange, editable, diagnostics }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
 
@@ -30,6 +36,7 @@ export function SourceView({ source, onSourceChange, editable }: Props) {
       doc: source,
       extensions: [
         ...extensionsForSource(source),
+        lintDiagnosticsStatic(source, diagnostics ?? []),
         EditorView.editable.of(editable),
         EditorState.readOnly.of(!editable),
         onSourceChange
@@ -48,7 +55,7 @@ export function SourceView({ source, onSourceChange, editable }: Props) {
     };
     // Re-mount on source mode flips; we keep the editor fresh on `source`
     // changes too, so the textarea tracks the workspace reducer exactly.
-  }, [source, editable, onSourceChange]);
+  }, [source, editable, onSourceChange, diagnostics]);
 
   // Keep CodeMirror's `editable` in sync with the prop without remounting
   // the whole view.

@@ -4,6 +4,7 @@ mod error;
 mod export;
 mod folder;
 mod fs;
+mod lint;
 mod menu;
 mod registry;
 mod search;
@@ -161,6 +162,7 @@ pub fn run() {
             commands::open_with,
             commands::export_html,
             commands::export_markdown,
+            commands::lint_markdown,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

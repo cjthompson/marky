@@ -22,10 +22,12 @@ import {
   onMenuAction,
   type AnnotatedFolder,
   type MenuAction,
+  type Diagnostic,
 } from "@/lib/tauri";
 import { folderForPath, pickAndAddFolder } from "@/lib/folders";
 import { buildStandaloneHtml, collectExport } from "@/lib/exportHtml";
 import { replaceLines, toggleTaskAt } from "@/lib/sourceEdit";
+import { DebouncedLint, runLintFor } from "@/lib/lint";
 import {
   createInitialState,
   reduce,
@@ -75,6 +77,7 @@ function AppShell() {
     zoomIn, zoomOut, zoomReset,
     sidebarLeftWidth, sidebarRightWidth,
     setSidebarWidth, resetSidebarWidth,
+    lintEnabled,
   } = usePreferences();
   const { resolved: resolvedTheme } = useTheme();
 
@@ -241,6 +244,42 @@ function AppShell() {
 
   // --- Save / discard / mode -------------------------------------------------
 
+  // ---- Lint lifecycle helpers ---------------------------------------------
+  //
+  // These are defined before `saveTab`/`commitBlock` etc. because each of
+  // those fires lint as a side effect of its main work.
+
+  const debouncedLintRef = useRef<DebouncedLint | null>(null);
+  if (debouncedLintRef.current === null) {
+    debouncedLintRef.current = new DebouncedLint();
+  }
+
+  const lintTab = useCallback(async (tab: TabState) => {
+    if (!tab.filePath || !lintEnabled) {
+      dispatch({ type: "SET_DIAGNOSTICS", tabId: tab.id, diagnostics: [] });
+      return;
+    }
+    try {
+      const diags = await runLintFor(tab);
+      dispatch({ type: "SET_DIAGNOSTICS", tabId: tab.id, diagnostics: diags });
+    } catch {
+      // lint failure shouldn't break editing — silently drop.
+    }
+  }, [lintEnabled]);
+
+  // Schedule a debounced lint run for the tab's current source. Used by
+  // Source view typing and on lintEnabled flip.
+  const scheduleLint = useCallback((tab: TabState) => {
+    if (!tab.filePath) return;
+    if (!lintEnabled) {
+      dispatch({ type: "SET_DIAGNOSTICS", tabId: tab.id, diagnostics: [] });
+      return;
+    }
+    debouncedLintRef.current?.schedule(tab.id, tab, (diags) => {
+      dispatch({ type: "SET_DIAGNOSTICS", tabId: tab.id, diagnostics: diags });
+    });
+  }, [lintEnabled]);
+
   const saveTab = useCallback(async (tab: TabState) => {
     if (!tab.filePath || tab.savedSource === undefined) return;
     if (tab.source === tab.savedSource) return;
@@ -248,6 +287,11 @@ function AppShell() {
       const outcome = await tauri.writeFile(tab.filePath, tab.source, tab.savedSource);
       if (outcome.kind === "saved") {
         dispatch({ type: "SAVED", tabId: tab.id, savedSource: tab.source });
+        // Re-lint the post-save content so the badge updates if the save
+        // landed different diagnostics.
+        if (lintEnabled) {
+          void lintTab({ ...tab, source: tab.source });
+        }
       } else {
         // Conflict: surface the dirty-tab banner via reducer. The banner UI is
         // built by #016; for now just log and leave the tab dirty.
@@ -257,7 +301,7 @@ function AppShell() {
     } catch (err) {
       console.error("save failed", err);
     }
-  }, []);
+  }, [lintEnabled, lintTab]);
 
   const discardTab = useCallback(async (tab: TabState) => {
     if (!tab.filePath) return;
@@ -353,15 +397,18 @@ function AppShell() {
     dispatch({ type: "SET_VIEW", tabId: tab.id, view: nextView });
   }, [activeTab]);
 
-  // Block-edit: splice new text into the tab's source and commit.
+  // Block-edit: splice new text into the tab's source and commit, then re-lint.
   const commitBlock = useCallback(
     (tabId: string, start: number, end: number, text: string) => {
       const tab = state.tabs[tabId];
       if (!tab) return;
       const next = replaceLines(tab.source, start, end, text);
       dispatch({ type: "COMMIT_EDIT", tabId, source: next });
+      if (lintEnabled) {
+        void lintTab({ ...tab, source: next });
+      }
     },
-    [state.tabs],
+    [state.tabs, lintTab, lintEnabled],
   );
 
   // Task-list checkbox toggle: just splice the line.
@@ -378,10 +425,36 @@ function AppShell() {
   );
 
   // Source-view typing: update source immediately (no commit into history;
-  // history is for block commits only).
+  // history is for block commits only). Also schedules a debounced lint run.
   const sourceEdit = useCallback((tabId: string, source: string) => {
     dispatch({ type: "UPDATE_TAB_SOURCE", tabId, source });
-  }, []);
+    const tab = state.tabs[tabId];
+    if (tab) {
+      scheduleLint({ ...tab, source });
+    }
+  }, [state.tabs, scheduleLint]);
+
+  // Lint on open: any tab with a filePath but no diagnostics yet gets a
+  // first-pass run. Tracks `state.tabs` keys so newly opened files trigger
+  // here without us having to plumb the schedule call through openFile.
+  // Also re-runs on lintEnabled toggle so the badge matches the setting.
+  const seenLintedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!lintEnabled) return;
+    for (const tab of Object.values(state.tabs)) {
+      if (!tab.filePath) continue;
+      // Force-clear so the badge doesn't lag the toggle.
+      dispatch({ type: "SET_DIAGNOSTICS", tabId: tab.id, diagnostics: [] });
+      scheduleLint(tab);
+      seenLintedRef.current.add(tab.id);
+    }
+    // Clean up for closed tabs so a later re-open re-runs.
+    const live = new Set(Object.keys(state.tabs));
+    for (const id of Array.from(seenLintedRef.current)) {
+      if (!live.has(id)) seenLintedRef.current.delete(id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.tabs, lintEnabled]);
 
   const tryCloseTab = useCallback((tabId: string, paneId: string) => {
     const tab = state.tabs[tabId];
@@ -414,6 +487,40 @@ function AppShell() {
     if (!activeTab) return;
     await discardTab(activeTab);
   }, [activeTab, discardTab]);
+
+  // Navigate the active tab to a diagnostic. In rendered mode we scroll the
+  // matching block into view; in source mode we just scroll — the editor's
+  // own diagnostic gutter marks the line.
+  const selectProblem = useCallback((diag: Diagnostic) => {
+    const tab = activeTab;
+    if (!tab) return;
+    if (tab.view === "source") {
+      // Find the editor host. The SourceView owns its own scroll; a quick
+      // approximation is to scroll the pane article element to the right line.
+      const pane = document.querySelector<HTMLElement>(
+        `[data-pane-id="${cssEscape(state.activePaneId)}"]`
+      );
+      const scroller = pane?.querySelector<HTMLElement>(".cm-scroller");
+      if (scroller) {
+        scroller.scrollTop = Math.max(0, (diag.line - 1) * 20);
+      }
+    } else {
+      const pane = document.querySelector<HTMLElement>(
+        `[data-pane-id="${cssEscape(state.activePaneId)}"]`
+      );
+      const scroller = pane?.querySelector<HTMLElement>(".markdown-body")?.parentElement;
+      if (!scroller) return;
+      const blocks = pane?.querySelectorAll<HTMLElement>("[data-source-map]");
+      for (const el of Array.from(blocks ?? [])) {
+        const raw = el.getAttribute("data-source-map");
+        const [s, e] = (raw ?? "").split(",").map((n) => Number.parseInt(n, 10));
+        if (Number.isFinite(s) && Number.isFinite(e) && diag.line >= s && diag.line <= e) {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+          return;
+        }
+      }
+    }
+  }, [activeTab, state.activePaneId]);
 
   // --- Pending prompt handlers ---------------------------------------------
 
@@ -685,6 +792,9 @@ function AppShell() {
           dirty={activeDirty}
           onSave={saveActiveTab}
           onDiscard={discardActiveTab}
+          problemsCount={activeTab?.diagnostics?.length ?? 0}
+          problems={activeTab?.diagnostics ?? []}
+          onSelectProblem={selectProblem}
         />
         <div className="flex min-h-0 flex-1 print:block">
           <main className="min-w-0 flex-1">

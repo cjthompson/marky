@@ -62,7 +62,31 @@ export const tauri = {
     invoke<string | null>("export_html", { html, suggestedName }),
   exportMarkdown: (sourcePath: string) =>
     invoke<string | null>("export_markdown", { sourcePath }),
+  lintMarkdown: (path: string | null, contents: string) =>
+    invoke<Diagnostic[]>("lint_markdown", { path, contents }),
 };
+
+/**
+ * Lint diagnostic from the Rust side. Mirrors `rumdl_lib::rule::LintWarning`
+ * after `lint_impl` maps it (line/col are 1-indexed). `fix` is present when
+ * rumdl provides an automatic rewrite.
+ */
+export interface Diagnostic {
+  line: number;
+  column: number;
+  end_line: number;
+  end_column: number;
+  rule: string;
+  message: string;
+  severity: "error" | "warning" | "info";
+  fix?: {
+    from_line: number;
+    from_col: number;
+    to_line: number;
+    to_col: number;
+    replacement: string;
+  };
+}
 
 export interface PreferencesPayload {
   zoom: number | null;
@@ -70,6 +94,7 @@ export interface PreferencesPayload {
   sidebar_right_width: number | null;
   copy_as_markdown: boolean | null;
   sidebar_group_by_repo: boolean | null;
+  lint_enabled: boolean | null;
 }
 
 export type WriteOutcome =
