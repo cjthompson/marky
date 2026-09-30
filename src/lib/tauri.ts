@@ -58,6 +58,10 @@ export const tauri = {
     invoke<void>("save_preferences", { prefs }),
   loadPreferences: () => invoke<PreferencesPayload>("load_preferences"),
   openWith: (path: string) => invoke<void>("open_with", { path }),
+  exportHtml: (html: string, suggestedName: string) =>
+    invoke<string | null>("export_html", { html, suggestedName }),
+  exportMarkdown: (sourcePath: string) =>
+    invoke<string | null>("export_markdown", { sourcePath }),
 };
 
 export interface PreferencesPayload {

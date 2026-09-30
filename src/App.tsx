@@ -3,7 +3,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { ThemeProvider } from "@/lib/theme";
+import { ThemeProvider, useTheme } from "@/lib/theme";
 import { PreferencesProvider, usePreferences } from "@/lib/preferences";
 import { ResizeHandle } from "@/components/ResizeHandle";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -23,6 +23,7 @@ import {
   type MenuAction,
 } from "@/lib/tauri";
 import { folderForPath, pickAndAddFolder } from "@/lib/folders";
+import { buildStandaloneHtml, collectExport } from "@/lib/exportHtml";
 import {
   createInitialState,
   reduce,
@@ -71,6 +72,7 @@ function AppShell() {
     sidebarLeftWidth, sidebarRightWidth,
     setSidebarWidth, resetSidebarWidth,
   } = usePreferences();
+  const { resolved: resolvedTheme } = useTheme();
 
   const activeTab = getActiveTab(state);
   const activePane = getActivePane(state);
@@ -182,6 +184,36 @@ function AppShell() {
       filters: [{ name: "Markdown", extensions: ["md", "markdown", "mdx"] }],
     });
     if (typeof picked === "string") openFile(picked);
+  };
+
+  const handleExportHtml = async () => {
+    if (!activeTab?.filePath) return;
+    const el = document.querySelector<HTMLElement>(
+      `[data-pane-id="${cssEscape(activePane.id)}"] article.markdown-body`
+    );
+    if (!el) return;
+    const { bodyHtml, css, title } = collectExport(el);
+    const baseName = activeTab.title.replace(/\.(md|markdown|mdx)$/i, "");
+    const html = buildStandaloneHtml({
+      title: title ?? baseName,
+      bodyHtml,
+      css,
+      dark: resolvedTheme === "dark",
+    });
+    try {
+      await tauri.exportHtml(html, baseName);
+    } catch (err) {
+      console.error("failed to export html", err);
+    }
+  };
+
+  const handleExportMarkdown = async () => {
+    if (!activeTab?.filePath) return;
+    try {
+      await tauri.exportMarkdown(activeTab.filePath);
+    } catch (err) {
+      console.error("failed to export markdown", err);
+    }
   };
 
   const handleSplit = (d: SplitDirection) => dispatch({ type: "SPLIT", direction: d });
@@ -456,8 +488,10 @@ function AppShell() {
         break;
       }
       case "export-html":
+        await handleExportHtml();
+        break;
       case "export-markdown":
-        // TODO(#006)
+        await handleExportMarkdown();
         break;
     }
   };

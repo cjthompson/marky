@@ -32,6 +32,7 @@ export function Pane({
 
   return (
     <div
+      data-pane-id={pane.id}
       onMouseDown={onFocusPane}
       className={cn(
         "relative flex min-h-0 min-w-0 flex-1 flex-col",

@@ -300,6 +300,16 @@ pub async fn open_with(app: AppHandle, path: String) -> AppResult<()> {
     }
 }
 
+#[tauri::command]
+pub async fn export_html(app: AppHandle, html: String, suggested_name: String) -> AppResult<Option<String>> {
+    crate::export::export_html(&app, html, suggested_name)
+}
+
+#[tauri::command]
+pub async fn export_markdown(app: AppHandle, source_path: String) -> AppResult<Option<String>> {
+    crate::export::export_markdown(&app, source_path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
