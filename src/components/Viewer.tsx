@@ -7,7 +7,7 @@ import { renderMermaidBlocks } from "@/lib/mermaid";
 import { attachCopyButtons } from "@/components/CodeCopyOverlay";
 import { handleCopyAsMarkdown } from "@/lib/copyAsMarkdown";
 import { BlockEditor } from "@/components/BlockEditor";
-import { findEditableBlock, parseSourceMap, replaceLines, toggleTaskAt } from "@/lib/sourceEdit";
+import { findEditableBlock, parseSourceMap } from "@/lib/sourceEdit";
 import { useTheme } from "@/lib/theme";
 import { usePreferences } from "@/lib/preferences";
 
@@ -162,7 +162,6 @@ export function Viewer({
       // Pull the existing source lines out of `source`.
       const startLine = block.start;
       const endLine = block.end;
-      const eol = source.includes("\r\n") ? "\r\n" : "\n";
       const lines = source.replace(/\r\n/g, "\n").split("\n");
       const slice = lines.slice(startLine - 1, endLine).join("\n");
 
@@ -239,7 +238,7 @@ export function Viewer({
       const lineAttr = li?.parentElement?.parentElement?.getAttribute("data-source-map");
       // We don't have a 1:1 mapping; fall back to the task-list item's map.
       const liMap = li?.getAttribute("data-source-map") ?? li?.parentElement?.getAttribute("data-source-map");
-      const map = parseSourceMap(liMap ?? lineAttr);
+      const map = parseSourceMap(liMap ?? lineAttr ?? null);
       if (map && onToggleCheckbox) {
         onToggleCheckbox(map[0]);
       }

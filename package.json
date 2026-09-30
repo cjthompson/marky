@@ -13,6 +13,7 @@
     "typecheck": "tsc -b --noEmit"
   },
   "dependencies": {
+    "@codemirror/autocomplete": "^6.20.3",
     "@codemirror/commands": "^6.11.1",
     "@codemirror/lang-markdown": "^6.5.2",
     "@codemirror/language": "^6.12.4",
@@ -69,13 +70,8 @@
     "happy-dom": "^16.5.3",
     "postcss": "^8.4.49",
     "tailwindcss": "^4.2.2",
-    "typescript": "~5.8.3",
+    "typescript": "^7.0.2",
     "vite": "^7.0.4",
     "vitest": "^2.1.8"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild"
-    ]
   }
 }

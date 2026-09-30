@@ -38,6 +38,7 @@ See `PLAN.md` → "Project Structure" for the full tree.
 ## Core conventions
 
 ### Rust (`src-tauri/`)
+
 - Keep `main.rs` thin — delegate to `cli.rs`, `fs.rs`, `folder.rs`, `search.rs`, `settings.rs`, `commands.rs`.
 - All frontend-callable functions live in `commands.rs` and are registered in `main.rs`'s `invoke_handler`.
 - Follow the `golang-style` skill's spirit even for Rust: happy path unindented, errors wrapped with context (`anyhow::Context` or `thiserror`).
@@ -46,18 +47,21 @@ See `PLAN.md` → "Project Structure" for the full tree.
 - **Fuzzy search index** is rebuilt from the registry on watcher events, debounced at 200ms. Keep it in-memory only.
 
 ### Frontend (`src/`)
+
 - Markdown pipeline lives in `src/lib/markdown.ts` as a single configured `markdown-it` instance. Do not create ad-hoc instances elsewhere.
 - Shiki highlighter is a lazy singleton in `src/lib/highlight.ts` — loading grammars is expensive, load once.
 - All `invoke()` calls go through typed wrappers in `src/lib/tauri.ts`. Do not call `@tauri-apps/api` `invoke` directly from components.
 - Components are function components with hooks. No class components.
 
 ### UI components
+
 - Use **shadcn/ui** primitives from `src/components/ui/` for dialogs, buttons, dropdowns, tooltips, command palette, scroll areas, etc.
 - Add new shadcn components via `pnpm dlx shadcn@latest add <component>` — do not hand-write primitives that shadcn already provides.
 - Shadcn files in `src/components/ui/` are **owned by us** once added — edit them freely. Don't re-run `add` on an existing component without intent to overwrite.
 - App-specific composite components (Viewer, Toolbar, etc.) live in `src/components/` and compose the primitives from `ui/`.
 
 ### Styling
+
 - Tailwind for layout and component chrome.
 - shadcn's CSS variables (`--background`, `--foreground`, `--muted`, etc.) drive theme colors. Prefer those tokens over raw Tailwind colors so light/dark stay consistent.
 - `src/styles/markdown.css` owns prose styles (headings, paragraphs, tables, blockquotes). Keep markdown styling there, not inline on components. Reference shadcn CSS variables where it makes sense.
@@ -87,10 +91,10 @@ pnpm tauri build         # production bundle (.app + .dmg on mac)
 ## What not to do
 
 - Don't add Electron fallbacks or wrappers.
-- Don't add a markdown editor — this is read-only by design. No contenteditable, no textareas for editing.
 - Don't persist user data outside `app_data_dir()`.
 - Don't fetch remote resources at runtime (except images referenced in the markdown itself). No telemetry, no auto-update pings without explicit opt-in.
 - Don't over-abstract. This is a single-purpose app — keep the component tree flat.
+- Don't use transparency mode because there is a WebKit bug that causes full GPU usage.
 
 ## When adding a new markdown feature
 
