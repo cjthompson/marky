@@ -40,6 +40,10 @@ export const tauri = {
   getInitialTarget: () => invoke<InitialTarget>("get_initial_target"),
   setInitialTarget: (target: InitialTarget) => invoke<void>("set_initial_target", { target }),
   readFile: (path: string) => invoke<string>("read_file", { path }),
+  writeFile: (path: string, contents: string, expectedBase: string) =>
+    invoke<WriteOutcome>("write_file", { path, contents, expectedBase }),
+  mergeText: (base: string, ours: string, theirs: string) =>
+    invoke<MergeResult>("merge_text", { base, ours, theirs }),
   listFolders: () => invoke<Folder[]>("list_folders"),
   listFoldersGrouped: () => invoke<AnnotatedFolder[]>("list_folders_grouped"),
   addFolder: (path: string) => invoke<Folder>("add_folder", { path }),
@@ -60,6 +64,15 @@ export interface PreferencesPayload {
   sidebar_right_width: number | null;
   copy_as_markdown: boolean | null;
   sidebar_group_by_repo: boolean | null;
+}
+
+export type WriteOutcome =
+  | { kind: "saved" }
+  | { kind: "conflict"; disk: string };
+
+export interface MergeResult {
+  merged: string;
+  conflicts: boolean;
 }
 
 export function onFolderChanged(cb: (folderId: string) => void): Promise<UnlistenFn> {

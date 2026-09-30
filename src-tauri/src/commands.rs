@@ -23,11 +23,75 @@ pub fn set_initial_target(target: InitialTarget, state: State<'_, InitialTargetS
 }
 
 #[tauri::command]
-pub fn read_file(path: String, registry: State<'_, SharedRegistry>) -> AppResult<String> {
+pub fn read_file(
+    path: String,
+    registry: State<'_, SharedRegistry>,
+    opened: State<'_, crate::OpenedFiles>,
+) -> AppResult<String> {
     let contents = crate::fs::read_text(&path)?;
-    registry.push_recent(path);
+    registry.push_recent(path.clone());
     let _ = registry.save(&data_dir());
+    if let Ok(canonical) = std::fs::canonicalize(PathBuf::from(&path)) {
+        opened.inner().0.lock().insert(canonical);
+    }
     Ok(contents)
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum WriteOutcome {
+    Saved,
+    Conflict { disk: String },
+}
+
+#[tauri::command]
+pub fn write_file(
+    path: String,
+    contents: String,
+    expected_base: String,
+    opened: State<'_, crate::OpenedFiles>,
+) -> AppResult<WriteOutcome> {
+    let canonical = std::fs::canonicalize(PathBuf::from(&path))
+        .map_err(|_| AppError::NotFound(format!("path {path}")))?;
+    {
+        let set = opened.inner().0.lock();
+        if !set.contains(&canonical) {
+            return Err(AppError::Invalid(format!(
+                "path {path} was not opened in this session"
+            )));
+        }
+    }
+    let disk = crate::fs::read_text(&canonical)?;
+    if disk != expected_base {
+        return Ok(WriteOutcome::Conflict { disk });
+    }
+    crate::fs::write_text_atomic(&canonical, &contents)?;
+    Ok(WriteOutcome::Saved)
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct MergeResult {
+    pub merged: String,
+    pub conflicts: bool,
+}
+
+#[tauri::command]
+pub fn merge_text(base: String, ours: String, theirs: String) -> AppResult<MergeResult> {
+    merge_text_impl(&base, &ours, &theirs)
+}
+
+/// Pure helper for testability. The command body delegates here.
+pub fn merge_text_impl(base: &str, ours: &str, theirs: &str) -> AppResult<MergeResult> {
+    match diffy::merge(base, ours, theirs) {
+        Ok(merged) => Ok(MergeResult {
+            merged,
+            conflicts: false,
+        }),
+        Err(conflict_text) => Ok(MergeResult {
+            merged: conflict_text.to_string(),
+            conflicts: true,
+        }),
+    }
 }
 
 #[tauri::command]
@@ -170,5 +234,37 @@ pub fn load_preferences(registry: State<'_, SharedRegistry>) -> PreferencesPaylo
         sidebar_right_width: s.sidebar_right_width,
         copy_as_markdown: s.copy_as_markdown,
         sidebar_group_by_repo: s.sidebar_group_by_repo,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn merge_clean_keeps_unique_changes() {
+        // Ours changes the top, theirs changes the bottom: independent hunks.
+        let r = merge_text_impl(
+            "shared-a\nshared-b\nshared-c\n",
+            "ours-top\nshared-a\nshared-b\nshared-c\n",
+            "shared-a\nshared-b\nshared-c\ntheirs-bottom\n",
+        )
+        .unwrap();
+        assert!(!r.conflicts);
+        assert!(r.merged.contains("ours-top"));
+        assert!(r.merged.contains("theirs-bottom"));
+    }
+
+    #[test]
+    fn merge_conflict_emits_markers() {
+        let r = merge_text_impl(
+            "line1\nline2\nline3\n",
+            "line1\nours2\nline3\n",
+            "line1\ntheirs2\nline3\n",
+        )
+        .unwrap();
+        assert!(r.conflicts);
+        assert!(r.merged.contains("<<<<<<<"));
+        assert!(r.merged.contains(">>>>>>>"));
     }
 }
