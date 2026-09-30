@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import type { PaneState, TabState } from "@/lib/workspace";
 import { TabBar } from "@/components/TabBar";
 import { Viewer } from "@/components/Viewer";
+import { SourceView } from "@/components/SourceView";
 import { DocSearch } from "@/components/DocSearch";
 import { cn } from "@/lib/utils";
 
@@ -14,6 +15,12 @@ interface Props {
   onFocusPane: () => void;
   searchOpen: boolean;
   onSearchClose: () => void;
+  /** Commit a spliced block edit (start/end are 1-based, inclusive). */
+  onCommitBlock?: (tabId: string, start: number, end: number, newText: string) => void;
+  /** Toggle the [ ]/[x] marker on the line. */
+  onToggleCheckbox?: (tabId: string, line: number) => void;
+  /** Source-view typing updates the tab's source immediately. */
+  onSourceEdit?: (tabId: string, source: string) => void;
 }
 
 export function Pane({
@@ -25,6 +32,9 @@ export function Pane({
   onFocusPane,
   searchOpen,
   onSearchClose,
+  onCommitBlock,
+  onToggleCheckbox,
+  onSourceEdit,
 }: Props) {
   const activeTab = pane.activeTabId ? tabs[pane.activeTabId] : undefined;
   const articleRef = useRef<HTMLElement>(null);
@@ -48,13 +58,25 @@ export function Pane({
       />
       <div className="relative flex min-h-0 flex-1">
         {activeTab ? (
-          <Viewer
-            key={activeTab.id}
-            source={activeTab.source}
-            filePath={activeTab.filePath}
-            articleRef={articleRef}
-            onRendered={() => setContentNonce((n) => n + 1)}
-          />
+          activeTab.view === "source" ? (
+            <SourceView
+              key={activeTab.id}
+              source={activeTab.source}
+              editable={activeTab.mode === "edit" && activeTab.filePath !== undefined}
+              onSourceChange={onSourceEdit ? (next) => onSourceEdit(activeTab.id, next) : undefined}
+            />
+          ) : (
+            <Viewer
+              key={activeTab.id}
+              source={activeTab.source}
+              filePath={activeTab.filePath}
+              articleRef={articleRef}
+              onRendered={() => setContentNonce((n) => n + 1)}
+              mode={activeTab.mode}
+              onCommitBlock={onCommitBlock ? (s, e, t) => onCommitBlock(activeTab.id, s, e, t) : undefined}
+              onToggleCheckbox={onToggleCheckbox ? (l) => onToggleCheckbox(activeTab.id, l) : undefined}
+            />
+          )
         ) : (
           <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
             Empty pane
