@@ -1,8 +1,9 @@
 import { useEffect, useReducer, useState, useCallback, useRef } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { ThemeProvider } from "@/lib/theme";
+import { ThemeProvider, useTheme } from "@/lib/theme";
 import { PreferencesProvider, usePreferences } from "@/lib/preferences";
 import { ResizeHandle } from "@/components/ResizeHandle";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -21,7 +22,8 @@ import {
   type AnnotatedFolder,
   type MenuAction,
 } from "@/lib/tauri";
-import { pickAndAddFolder } from "@/lib/folders";
+import { folderForPath, pickAndAddFolder } from "@/lib/folders";
+import { buildStandaloneHtml, collectExport } from "@/lib/exportHtml";
 import { replaceLines, toggleTaskAt } from "@/lib/sourceEdit";
 import {
   createInitialState,
@@ -71,6 +73,7 @@ function AppShell() {
     sidebarLeftWidth, sidebarRightWidth,
     setSidebarWidth, resetSidebarWidth,
   } = usePreferences();
+  const { resolved: resolvedTheme } = useTheme();
 
   const activeTab = getActiveTab(state);
   const activePane = getActivePane(state);
@@ -182,6 +185,36 @@ function AppShell() {
       filters: [{ name: "Markdown", extensions: ["md", "markdown", "mdx"] }],
     });
     if (typeof picked === "string") openFile(picked);
+  };
+
+  const handleExportHtml = async () => {
+    if (!activeTab?.filePath) return;
+    const el = document.querySelector<HTMLElement>(
+      `[data-pane-id="${cssEscape(activePane.id)}"] article.markdown-body`
+    );
+    if (!el) return;
+    const { bodyHtml, css, title } = collectExport(el);
+    const baseName = activeTab.title.replace(/\.(md|markdown|mdx)$/i, "");
+    const html = buildStandaloneHtml({
+      title: title ?? baseName,
+      bodyHtml,
+      css,
+      dark: resolvedTheme === "dark",
+    });
+    try {
+      await tauri.exportHtml(html, baseName);
+    } catch (err) {
+      console.error("failed to export html", err);
+    }
+  };
+
+  const handleExportMarkdown = async () => {
+    if (!activeTab?.filePath) return;
+    try {
+      await tauri.exportMarkdown(activeTab.filePath);
+    } catch (err) {
+      console.error("failed to export markdown", err);
+    }
   };
 
   const handleSplit = (d: SplitDirection) => dispatch({ type: "SPLIT", direction: d });
@@ -454,18 +487,52 @@ function AppShell() {
       case "zoom-reset":
         zoomReset();
         break;
-      case "rescan-folder":
-      case "close-folder":
-        // TODO(#002)
+      case "rescan-folder": {
+        const folder = folderForPath(folders, activeTab?.filePath);
+        if (folder) {
+          try {
+            await tauri.rescanFolder(folder.id);
+          } catch (err) {
+            console.error("failed to rescan folder", err);
+          }
+        }
         break;
+      }
+      case "close-folder": {
+        const folder = folderForPath(folders, activeTab?.filePath);
+        if (folder) {
+          try {
+            await tauri.removeFolder(folder.id);
+          } catch (err) {
+            console.error("failed to close folder", err);
+          }
+        }
+        break;
+      }
       case "print":
-      case "reveal":
-      case "open-with":
-        // TODO(#005)
+        window.print();
         break;
+      case "reveal": {
+        if (activeTab?.filePath) {
+          revealItemInDir(activeTab.filePath);
+        }
+        break;
+      }
+      case "open-with": {
+        if (activeTab?.filePath) {
+          try {
+            await tauri.openWith(activeTab.filePath);
+          } catch (err) {
+            console.error("open with failed", err);
+          }
+        }
+        break;
+      }
       case "export-html":
+        await handleExportHtml();
+        break;
       case "export-markdown":
-        // TODO(#006)
+        await handleExportMarkdown();
         break;
     }
   };
@@ -506,7 +573,7 @@ function AppShell() {
 
   return (
     <div className="flex h-full">
-      <div ref={sidebarRef} className="flex h-full min-h-0 shrink-0" style={{ width: sidebarLeftWidth }}>
+      <div ref={sidebarRef} className="flex h-full min-h-0 shrink-0 print:hidden" style={{ width: sidebarLeftWidth }}>
         <FolderSidebar
           activePath={activeTab?.filePath}
           onOpenFile={openFile}
@@ -518,6 +585,7 @@ function AppShell() {
         side="left"
         onResize={(w) => setSidebarWidth("left", w)}
         onReset={() => resetSidebarWidth("left")}
+        className="print:hidden"
       />
       <div className="flex min-w-0 flex-1 flex-col">
         <Toolbar
@@ -535,7 +603,7 @@ function AppShell() {
           onSave={saveActiveTab}
           onDiscard={discardActiveTab}
         />
-        <div className="flex min-h-0 flex-1">
+        <div className="flex min-h-0 flex-1 print:block">
           <main className="min-w-0 flex-1">
             <div
               className={cn(
@@ -544,12 +612,12 @@ function AppShell() {
               )}
             >
               {state.panes.map((p, i) => (
-                <div key={p.id} className="flex min-h-0 min-w-0 flex-1">
+                <div key={p.id} className={cn("flex min-h-0 min-w-0 flex-1", isSplit && p.id !== state.activePaneId && "print:hidden")}>
                   {renderPane(p.id)}
                   {i < state.panes.length - 1 && (
                     <div
                       className={cn(
-                        "shrink-0 bg-border",
+                        "shrink-0 bg-border print:hidden",
                         state.split === "horizontal" ? "h-px w-full" : "h-full w-px"
                       )}
                     />
@@ -564,9 +632,9 @@ function AppShell() {
                 side="right"
                 onResize={(w) => setSidebarWidth("right", w)}
                 onReset={() => resetSidebarWidth("right")}
-                className="hidden lg:flex"
+                className="hidden lg:flex print:hidden"
               />
-              <aside className="hidden shrink-0 border-l bg-card/30 lg:block" style={{ width: sidebarRightWidth }}>
+              <aside className="hidden shrink-0 border-l bg-card/30 lg:block print:hidden" style={{ width: sidebarRightWidth }}>
                 <TableOfContents source={activeTab?.source ?? ""} />
               </aside>
             </>

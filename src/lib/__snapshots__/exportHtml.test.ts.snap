@@ -1,0 +1,39 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`buildStandaloneHtml > renders a dark-mode document (snapshot) 1`] = `
+"<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My Doc</title>
+<style>
+body { color: red; }
+</style>
+</head>
+<body>
+<article class="markdown-body">
+<h1>My Doc</h1><p>Hello</p>
+</article>
+</body>
+</html>"
+`;
+
+exports[`buildStandaloneHtml > renders a light-mode document (snapshot) 1`] = `
+"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My Doc</title>
+<style>
+body { color: red; }
+</style>
+</head>
+<body>
+<article class="markdown-body">
+<h1>My Doc</h1><p>Hello</p>
+</article>
+</body>
+</html>"
+`;

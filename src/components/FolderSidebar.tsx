@@ -159,7 +159,7 @@ export function FolderSidebar({ activePath, onOpenFile, onOpenPalette, refreshNo
   const groups = groupByRepo(folders);
 
   return (
-    <div className="flex h-full w-full shrink-0 flex-col border-r bg-card">
+    <div className="flex h-full w-full shrink-0 flex-col border-r bg-card print:hidden">
       <div className="px-2 pt-2">
         <button
           type="button"

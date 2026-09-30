@@ -96,6 +96,18 @@ impl FolderRegistry {
         self.inner.write().settings.push_recent(path);
     }
 
+    pub fn push_recent_folder(&self, path: String) {
+        self.inner.write().settings.push_recent_folder(path);
+    }
+
+    pub fn clear_recent_files(&self) {
+        self.inner.write().settings.recent_files.clear();
+    }
+
+    pub fn clear_recent_folders(&self) {
+        self.inner.write().settings.recent_folders.clear();
+    }
+
     pub fn save(&self, dir: &std::path::Path) -> AppResult<()> {
         self.inner.read().settings.save(dir)
     }

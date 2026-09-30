@@ -14,6 +14,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Rescan Folder (⇧⌘R) and Close Folder (⇧⌘W) for the active file's folder
+- Open Recent ▸ and Open Recent Folder ▸ submenus (≤10 entries + Clear Menu)
+- Print… (⌘P) with print-only CSS for clean PDF export
+- Reveal in Finder / Show in File Manager (⌥⌘R)
+- Open With… (⌥⌘O, macOS only) — picker starts in /Applications
+- Export ▸ HTML… (⌥⌘E) and Export ▸ Markdown Copy… (⇧⌘S)
 - Adjustable text size — scales all text app-wide (sidebar, toolbar, command palette, markdown content) via Settings dropdown or Cmd+Plus/Cmd+Minus/Cmd+0
 - Resizable sidebars — drag the edge of the folder sidebar or table of contents to resize; double-click to reset to default
 - Copy contents as markdown

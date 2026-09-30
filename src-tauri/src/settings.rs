@@ -22,6 +22,8 @@ pub struct Settings {
     #[serde(default)]
     pub recent_files: Vec<String>,
     #[serde(default)]
+    pub recent_folders: Vec<String>,
+    #[serde(default)]
     pub theme: Option<String>,
     #[serde(default)]
     pub zoom: Option<f64>,
@@ -63,6 +65,20 @@ impl Settings {
         self.recent_files.insert(0, path.clone());
         self.recent_files.truncate(RECENT_LIMIT);
         self.last_opened_file = Some(path);
+    }
+
+    pub fn push_recent_folder(&mut self, path: String) {
+        self.recent_folders.retain(|p| p != &path);
+        self.recent_folders.insert(0, path);
+        self.recent_folders.truncate(RECENT_LIMIT);
+    }
+
+    pub fn clear_recent_files(&mut self) {
+        self.recent_files.clear();
+    }
+
+    pub fn clear_recent_folders(&mut self) {
+        self.recent_folders.clear();
     }
 
     pub fn add_folder(&mut self, folder: Folder) {
@@ -177,5 +193,48 @@ mod tests {
         let s = Settings::load(dir.path()).unwrap();
         assert_eq!(s.folders.len(), 1);
         assert_eq!(s.folders[0].id, "v1");
+    }
+
+    #[test]
+    fn push_recent_folder_dedups_and_caps() {
+        let mut s = Settings::default();
+        for i in 0..30 {
+            s.push_recent_folder(format!("/p/{i}"));
+        }
+        assert_eq!(s.recent_folders.len(), RECENT_LIMIT);
+        assert_eq!(s.recent_folders[0], "/p/29");
+
+        s.push_recent_folder("/p/5".into());
+        assert_eq!(s.recent_folders[0], "/p/5");
+        let occurrences = s.recent_folders.iter().filter(|p| *p == "/p/5").count();
+        assert_eq!(occurrences, 1);
+    }
+
+    #[test]
+    fn recent_folders_defaults_to_empty_when_field_missing() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("settings.json"), r#"{"folders":[]}"#).unwrap();
+        let s = Settings::load(dir.path()).unwrap();
+        assert!(s.recent_folders.is_empty());
+    }
+
+    #[test]
+    fn clear_recent_files_empties_list() {
+        let mut s = Settings::default();
+        s.push_recent("/p/1.md".into());
+        s.push_recent("/p/2.md".into());
+        assert!(!s.recent_files.is_empty());
+        s.clear_recent_files();
+        assert!(s.recent_files.is_empty());
+    }
+
+    #[test]
+    fn clear_recent_folders_empties_list() {
+        let mut s = Settings::default();
+        s.push_recent_folder("/p/1".into());
+        s.push_recent_folder("/p/2".into());
+        assert!(!s.recent_folders.is_empty());
+        s.clear_recent_folders();
+        assert!(s.recent_folders.is_empty());
     }
 }

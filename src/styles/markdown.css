@@ -235,3 +235,11 @@
   font-size: 0.9em;
   @apply text-muted-foreground;
 }
+
+@media print {
+  .markdown-body pre,
+  .markdown-body table,
+  .markdown-body .mermaid-block svg {
+    break-inside: avoid;
+  }
+}

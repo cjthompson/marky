@@ -26,7 +26,7 @@ export function TabBar({ pane, tabs, isFocused, onSelect, onClose, onFocusPane }
     <div
       onMouseDown={onFocusPane}
       className={cn(
-        "flex h-9 shrink-0 items-end gap-0.5 overflow-x-auto border-b bg-card/40 px-1 pt-1",
+        "flex h-9 shrink-0 items-end gap-0.5 overflow-x-auto border-b bg-card/40 px-1 pt-1 print:hidden",
         !isFocused && "opacity-70"
       )}
     >

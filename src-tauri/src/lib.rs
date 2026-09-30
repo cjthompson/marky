@@ -1,6 +1,7 @@
 mod cli;
 mod commands;
 mod error;
+mod export;
 mod folder;
 mod fs;
 mod menu;
@@ -39,7 +40,7 @@ impl OpenedFiles {
 /// Handle a new CLI target from either single-instance forwarding or macOS
 /// file-open events: register folders, update managed state, emit to frontend,
 /// and focus the main window.
-fn handle_target(app: &tauri::AppHandle, target: cli::InitialTarget) {
+pub(crate) fn handle_target(app: &tauri::AppHandle, target: cli::InitialTarget) {
     let resolved = match &target {
         cli::InitialTarget::Folder { path } => {
             if let (Some(reg), Some(watchers)) = (
@@ -135,6 +136,8 @@ pub fn run() {
             app.set_menu(menu)?;
             app.manage(handles);
 
+            menu::refresh_recent(app.handle())?;
+
             Ok(())
         })
         .on_menu_event(menu::handle_event)
@@ -148,12 +151,16 @@ pub fn run() {
             commands::list_folders_grouped,
             commands::add_folder,
             commands::remove_folder,
+            commands::rescan_folder,
             commands::read_folder_tree,
             commands::search_files,
             commands::get_recent_files,
             commands::save_theme,
             commands::save_preferences,
             commands::load_preferences,
+            commands::open_with,
+            commands::export_html,
+            commands::export_markdown,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

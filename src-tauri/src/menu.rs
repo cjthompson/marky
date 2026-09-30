@@ -4,8 +4,11 @@
 //! live entirely in this module via `#[cfg(target_os = "macos")]` /
 //! `#[cfg(not(target_os = "macos"))]`. `cfg!()` is only used for label text.
 
+use crate::registry::SharedRegistry;
+use std::path::Path;
 use tauri::menu::{
-    Menu, MenuBuilder, MenuEvent, MenuItem, MenuItemBuilder, Submenu, SubmenuBuilder,
+    Menu, MenuBuilder, MenuEvent, MenuItem, MenuItemBuilder, PredefinedMenuItem, Submenu,
+    SubmenuBuilder,
 };
 use tauri::{AppHandle, Emitter, Manager, Wry};
 use tauri_plugin_opener::OpenerExt;
@@ -354,8 +357,124 @@ pub fn handle_event(app: &AppHandle, event: MenuEvent) {
             }
         }
         MenuCommand::Forward(id) => {
+            if let Some(rest) = id.strip_prefix("recent-file:") {
+                handle_recent_target(app, rest);
+                return;
+            }
+            if let Some(rest) = id.strip_prefix("recent-folder:") {
+                handle_recent_target(app, rest);
+                return;
+            }
+            if id == "clear-recent-files" || id == "clear-recent-folders" {
+                handle_clear_recent(app, id == "clear-recent-files");
+                return;
+            }
             let _ = app.emit("menu://action", id);
         }
+    }
+}
+
+fn handle_recent_target(app: &AppHandle, path: &str) {
+    crate::handle_target(app, crate::cli::classify(Path::new(path)));
+}
+
+fn handle_clear_recent(app: &AppHandle, files: bool) {
+    let registry = app.state::<SharedRegistry>();
+    if files {
+        registry.clear_recent_files();
+    } else {
+        registry.clear_recent_folders();
+    }
+    let _ = registry.save(&crate::settings::data_dir());
+    let _ = refresh_recent(app);
+}
+
+/// Rebuild the "Open Recent" and "Open Recent Folder" submenus from current
+/// settings. Caps display at 10 items per side. Idempotent.
+pub fn refresh_recent(app: &AppHandle) -> tauri::Result<()> {
+    let handles = app.state::<MenuHandles>();
+    let registry = app.state::<SharedRegistry>();
+    let settings = registry.settings();
+
+    refresh_one_submenu(
+        app,
+        &handles.recent_files,
+        &settings.recent_files,
+        "recent-file:",
+        "clear-recent-files",
+    )?;
+
+    refresh_one_submenu(
+        app,
+        &handles.recent_folders,
+        &settings.recent_folders,
+        "recent-folder:",
+        "clear-recent-folders",
+    )?;
+
+    Ok(())
+}
+
+fn refresh_one_submenu(
+    app: &AppHandle,
+    submenu: &Submenu<Wry>,
+    items: &[String],
+    id_prefix: &str,
+    clear_id: &str,
+) -> tauri::Result<()> {
+    // Clear existing items.
+    while let Ok(existing) = submenu.items() {
+        if existing.is_empty() {
+            break;
+        }
+        if submenu.remove_at(0).is_err() {
+            break;
+        }
+    }
+
+    if items.is_empty() {
+        let _ = submenu.set_enabled(false);
+        return Ok(());
+    }
+
+    let _ = submenu.set_enabled(true);
+
+    let display_count = items.len().min(10);
+    for path in &items[..display_count] {
+        let label = format_label(path);
+        let id = format!("{id_prefix}{path}");
+        let menu_item = MenuItemBuilder::with_id(&id, &label).build(app)?;
+        submenu.append(&menu_item)?;
+    }
+
+    let separator = PredefinedMenuItem::separator(app)?;
+    submenu.append(&separator)?;
+
+    let clear_label = if id_prefix == "recent-file:" {
+        "Clear Menu"
+    } else {
+        "Clear Menu"
+    };
+    let clear_item = MenuItemBuilder::with_id(clear_id, clear_label).build(app)?;
+    submenu.append(&clear_item)?;
+
+    Ok(())
+}
+
+fn format_label(path: &str) -> String {
+    let p = Path::new(path);
+    let file_name = p
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string());
+    let parent_display = p
+        .parent()
+        .and_then(|parent| parent.file_name())
+        .map(|n| n.to_string_lossy().to_string());
+
+    match parent_display {
+        Some(parent) => format!("{file_name} — {parent}"),
+        None => file_name,
     }
 }
 
@@ -397,6 +516,38 @@ mod tests {
         assert_eq!(
             parse_menu_id("close-tab"),
             MenuCommand::Forward("close-tab".to_string())
+        );
+    }
+
+    #[test]
+    fn parses_recent_file_id() {
+        assert_eq!(
+            parse_menu_id("recent-file:/abs/path.md"),
+            MenuCommand::Forward("recent-file:/abs/path.md".to_string())
+        );
+    }
+
+    #[test]
+    fn parses_recent_folder_id() {
+        assert_eq!(
+            parse_menu_id("recent-folder:/abs/folder"),
+            MenuCommand::Forward("recent-folder:/abs/folder".to_string())
+        );
+    }
+
+    #[test]
+    fn parses_clear_recent_files() {
+        assert_eq!(
+            parse_menu_id("clear-recent-files"),
+            MenuCommand::Forward("clear-recent-files".to_string())
+        );
+    }
+
+    #[test]
+    fn parses_clear_recent_folders() {
+        assert_eq!(
+            parse_menu_id("clear-recent-folders"),
+            MenuCommand::Forward("clear-recent-folders".to_string())
         );
     }
 }

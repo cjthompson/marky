@@ -282,7 +282,7 @@ export function Viewer({
   ) : null;
 
   return (
-    <div ref={scrollerRef} className="relative h-full w-full overflow-auto">
+    <div ref={scrollerRef} className="relative h-full w-full overflow-auto print:h-auto print:overflow-visible">
       <article ref={ref} className="markdown-body" dangerouslySetInnerHTML={dangerousHtml} />
       {pencil}
       {editing &&

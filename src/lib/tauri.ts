@@ -48,6 +48,7 @@ export const tauri = {
   listFoldersGrouped: () => invoke<AnnotatedFolder[]>("list_folders_grouped"),
   addFolder: (path: string) => invoke<Folder>("add_folder", { path }),
   removeFolder: (id: string) => invoke<void>("remove_folder", { id }),
+  rescanFolder: (id: string) => invoke<void>("rescan_folder", { id }),
   readFolderTree: (id: string) => invoke<TreeNode>("read_folder_tree", { id }),
   searchFiles: (query: string, limit = 50) =>
     invoke<SearchResult[]>("search_files", { args: { query, limit } }),
@@ -56,6 +57,11 @@ export const tauri = {
   savePreferences: (prefs: PreferencesPayload) =>
     invoke<void>("save_preferences", { prefs }),
   loadPreferences: () => invoke<PreferencesPayload>("load_preferences"),
+  openWith: (path: string) => invoke<void>("open_with", { path }),
+  exportHtml: (html: string, suggestedName: string) =>
+    invoke<string | null>("export_html", { html, suggestedName }),
+  exportMarkdown: (sourcePath: string) =>
+    invoke<string | null>("export_markdown", { sourcePath }),
 };
 
 export interface PreferencesPayload {

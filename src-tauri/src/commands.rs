@@ -24,6 +24,7 @@ pub fn set_initial_target(target: InitialTarget, state: State<'_, InitialTargetS
 
 #[tauri::command]
 pub fn read_file(
+    app: AppHandle,
     path: String,
     registry: State<'_, SharedRegistry>,
     opened: State<'_, crate::OpenedFiles>,
@@ -34,6 +35,7 @@ pub fn read_file(
     if let Ok(canonical) = std::fs::canonicalize(PathBuf::from(&path)) {
         opened.inner().0.lock().insert(canonical);
     }
+    let _ = crate::menu::refresh_recent(&app);
     Ok(contents)
 }
 
@@ -139,6 +141,8 @@ pub fn add_folder(
 ) -> AppResult<Folder> {
     let folder = registry.add_folder(PathBuf::from(&path))?;
     registry.save(&data_dir())?;
+    registry.push_recent_folder(folder.path.clone());
+    let _ = registry.save(&data_dir());
     if let Ok(handle) = watch_folder(
         app.clone(),
         Arc::clone(&registry),
@@ -148,6 +152,7 @@ pub fn add_folder(
         watchers.insert(folder.id.clone(), handle);
     }
     let _ = app.emit("folder://changed", &folder.id);
+    let _ = crate::menu::refresh_recent(&app);
     Ok(folder)
 }
 
@@ -161,6 +166,30 @@ pub fn remove_folder(
     registry.remove_folder(&id);
     watchers.remove(&id);
     registry.save(&data_dir())?;
+    let _ = app.emit("folder://changed", &id);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn rescan_folder(
+    app: AppHandle,
+    id: String,
+    registry: State<'_, SharedRegistry>,
+    watchers: State<'_, SharedWatchers>,
+) -> AppResult<()> {
+    registry.refresh_folder(&id);
+    let folder = registry.folders().into_iter().find(|v| v.id == id);
+    if let Some(v) = folder {
+        if let Ok(handle) = watch_folder(
+            app.clone(),
+            Arc::clone(&registry),
+            v.id.clone(),
+            PathBuf::from(&v.path),
+        ) {
+            watchers.remove(&v.id);
+            watchers.insert(v.id.clone(), handle);
+        }
+    }
     let _ = app.emit("folder://changed", &id);
     Ok(())
 }
@@ -235,6 +264,50 @@ pub fn load_preferences(registry: State<'_, SharedRegistry>) -> PreferencesPaylo
         copy_as_markdown: s.copy_as_markdown,
         sidebar_group_by_repo: s.sidebar_group_by_repo,
     }
+}
+
+#[tauri::command]
+pub async fn open_with(app: AppHandle, path: String) -> AppResult<()> {
+    #[cfg(target_os = "macos")]
+    {
+        use tauri_plugin_dialog::DialogExt;
+        use tauri_plugin_opener::OpenerExt;
+
+        // Synchronous pick inside an async command per the plan
+        let chosen = app
+            .dialog()
+            .file()
+            .set_directory("/Applications")
+            .add_filter("Applications", &["app"])
+            .blocking_pick_file();
+
+        let Some(chosen) = chosen else { return Ok(()) };
+        let app_path = match chosen.into_path() {
+            Ok(p) => p,
+            Err(e) => return Err(AppError::Invalid(format!("invalid app path: {e}"))),
+        };
+
+        app.opener()
+            .open_path(path, Some(app_path.to_string_lossy().to_string()))
+            .map_err(|e| AppError::Invalid(format!("opener: {e}")))?;
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (app, path);
+        Err(AppError::Invalid("unsupported on this platform".to_string()))
+    }
+}
+
+#[tauri::command]
+pub async fn export_html(app: AppHandle, html: String, suggested_name: String) -> AppResult<Option<String>> {
+    crate::export::export_html(&app, html, suggested_name)
+}
+
+#[tauri::command]
+pub async fn export_markdown(app: AppHandle, source_path: String) -> AppResult<Option<String>> {
+    crate::export::export_markdown(&app, source_path)
 }
 
 #[cfg(test)]
