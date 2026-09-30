@@ -1,4 +1,5 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { tauri, onFolderChanged, type AnnotatedFolder, type TreeNode } from "@/lib/tauri";
 import { pickAndAddFolder } from "@/lib/folders";
 import { usePreferences } from "@/lib/preferences";
@@ -75,19 +76,31 @@ export function FolderSidebar({ activePath, onOpenFile, onOpenPalette, refreshNo
     loadAll();
   }, [loadAll, refreshNonce]);
 
+  const debounceTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
   useEffect(() => {
-    const off = onFolderChanged(async (folderId) => {
-      try {
-        const tree = await tauri.readFolderTree(folderId);
-        setTrees((prev) => ({ ...prev, [folderId]: tree }));
-      } catch {
-        // ignore
-      }
-      const list = await tauri.listFoldersGrouped();
-      setFolders(list);
+    const off = onFolderChanged((folderId) => {
+      const timers = debounceTimersRef.current;
+      const existing = timers.get(folderId);
+      if (existing) clearTimeout(existing);
+      const handle = setTimeout(async () => {
+        timers.delete(folderId);
+        try {
+          const tree = await tauri.readFolderTree(folderId);
+          setTrees((prev) => ({ ...prev, [folderId]: tree }));
+        } catch {
+          // ignore
+        }
+        const list = await tauri.listFoldersGrouped();
+        setFolders(list);
+      }, 200);
+      timers.set(folderId, handle);
     });
     return () => {
       off.then((fn) => fn());
+      const timers = debounceTimersRef.current;
+      timers.forEach((handle) => clearTimeout(handle));
+      timers.clear();
     };
   }, []);
 
