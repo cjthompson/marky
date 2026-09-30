@@ -157,6 +157,7 @@ pub fn run() {
             commands::save_theme,
             commands::save_preferences,
             commands::load_preferences,
+            commands::open_with,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

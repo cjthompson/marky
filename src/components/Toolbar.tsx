@@ -51,7 +51,7 @@ export function Toolbar({
   const ModeIcon = mode === "edit" ? Pencil : Lock;
 
   return (
-    <header className="flex h-9 shrink-0 items-center justify-between border-b bg-card/40 px-3">
+    <header className="flex h-9 shrink-0 items-center justify-between border-b bg-card/40 px-3 print:hidden">
       <div className="flex items-center gap-2">
         <Tooltip>
           <TooltipTrigger asChild>

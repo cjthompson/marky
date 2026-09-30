@@ -10,7 +10,7 @@ export function TableOfContents({ source }: { source: string }) {
   }
 
   return (
-    <ScrollArea className="h-full">
+    <ScrollArea className="h-full print:hidden">
       <nav className="px-3 py-2 text-sm">
         <div className="px-1 pb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           On this page

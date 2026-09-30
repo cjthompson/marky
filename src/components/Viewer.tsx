@@ -110,7 +110,7 @@ export function Viewer({ source, filePath, articleRef, onRendered }: Props) {
   const dangerousHtml = React.useMemo(() => ({ __html: html }), [html]);
 
   return (
-    <div ref={scrollerRef} className="h-full w-full overflow-auto">
+    <div ref={scrollerRef} className="h-full w-full overflow-auto print:h-auto print:overflow-visible">
       <article ref={ref} className="markdown-body" dangerouslySetInnerHTML={dangerousHtml} />
     </div>
   );

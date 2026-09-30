@@ -266,6 +266,40 @@ pub fn load_preferences(registry: State<'_, SharedRegistry>) -> PreferencesPaylo
     }
 }
 
+#[tauri::command]
+pub async fn open_with(app: AppHandle, path: String) -> AppResult<()> {
+    #[cfg(target_os = "macos")]
+    {
+        use tauri_plugin_dialog::DialogExt;
+        use tauri_plugin_opener::OpenerExt;
+
+        // Synchronous pick inside an async command per the plan
+        let chosen = app
+            .dialog()
+            .file()
+            .set_directory("/Applications")
+            .add_filter("Applications", &["app"])
+            .blocking_pick_file();
+
+        let Some(chosen) = chosen else { return Ok(()) };
+        let app_path = match chosen.into_path() {
+            Ok(p) => p,
+            Err(e) => return Err(AppError::Invalid(format!("invalid app path: {e}"))),
+        };
+
+        app.opener()
+            .open_path(path, Some(app_path.to_string_lossy().to_string()))
+            .map_err(|e| AppError::Invalid(format!("opener: {e}")))?;
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (app, path);
+        Err(AppError::Invalid("unsupported on this platform".to_string()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

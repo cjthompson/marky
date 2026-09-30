@@ -1,5 +1,6 @@
 import { useEffect, useReducer, useState, useCallback, useRef } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ThemeProvider } from "@/lib/theme";
@@ -436,10 +437,24 @@ function AppShell() {
         break;
       }
       case "print":
-      case "reveal":
-      case "open-with":
-        // TODO(#005)
+        window.print();
         break;
+      case "reveal": {
+        if (activeTab?.filePath) {
+          revealItemInDir(activeTab.filePath);
+        }
+        break;
+      }
+      case "open-with": {
+        if (activeTab?.filePath) {
+          try {
+            await tauri.openWith(activeTab.filePath);
+          } catch (err) {
+            console.error("open with failed", err);
+          }
+        }
+        break;
+      }
       case "export-html":
       case "export-markdown":
         // TODO(#006)
@@ -480,7 +495,7 @@ function AppShell() {
 
   return (
     <div className="flex h-full">
-      <div ref={sidebarRef} className="flex h-full min-h-0 shrink-0" style={{ width: sidebarLeftWidth }}>
+      <div ref={sidebarRef} className="flex h-full min-h-0 shrink-0 print:hidden" style={{ width: sidebarLeftWidth }}>
         <FolderSidebar
           activePath={activeTab?.filePath}
           onOpenFile={openFile}
@@ -492,6 +507,7 @@ function AppShell() {
         side="left"
         onResize={(w) => setSidebarWidth("left", w)}
         onReset={() => resetSidebarWidth("left")}
+        className="print:hidden"
       />
       <div className="flex min-w-0 flex-1 flex-col">
         <Toolbar
@@ -507,7 +523,7 @@ function AppShell() {
           onSave={saveActiveTab}
           onDiscard={discardActiveTab}
         />
-        <div className="flex min-h-0 flex-1">
+        <div className="flex min-h-0 flex-1 print:block">
           <main className="min-w-0 flex-1">
             <div
               className={cn(
@@ -516,12 +532,12 @@ function AppShell() {
               )}
             >
               {state.panes.map((p, i) => (
-                <div key={p.id} className="flex min-h-0 min-w-0 flex-1">
+                <div key={p.id} className={cn("flex min-h-0 min-w-0 flex-1", isSplit && p.id !== state.activePaneId && "print:hidden")}>
                   {renderPane(p.id)}
                   {i < state.panes.length - 1 && (
                     <div
                       className={cn(
-                        "shrink-0 bg-border",
+                        "shrink-0 bg-border print:hidden",
                         state.split === "horizontal" ? "h-px w-full" : "h-full w-px"
                       )}
                     />
@@ -536,9 +552,9 @@ function AppShell() {
                 side="right"
                 onResize={(w) => setSidebarWidth("right", w)}
                 onReset={() => resetSidebarWidth("right")}
-                className="hidden lg:flex"
+                className="hidden lg:flex print:hidden"
               />
-              <aside className="hidden shrink-0 border-l bg-card/30 lg:block" style={{ width: sidebarRightWidth }}>
+              <aside className="hidden shrink-0 border-l bg-card/30 lg:block print:hidden" style={{ width: sidebarRightWidth }}>
                 <TableOfContents source={activeTab?.source ?? ""} />
               </aside>
             </>
