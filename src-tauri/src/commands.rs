@@ -166,6 +166,30 @@ pub fn remove_folder(
 }
 
 #[tauri::command]
+pub fn rescan_folder(
+    app: AppHandle,
+    id: String,
+    registry: State<'_, SharedRegistry>,
+    watchers: State<'_, SharedWatchers>,
+) -> AppResult<()> {
+    registry.refresh_folder(&id);
+    let folder = registry.folders().into_iter().find(|v| v.id == id);
+    if let Some(v) = folder {
+        if let Ok(handle) = watch_folder(
+            app.clone(),
+            Arc::clone(&registry),
+            v.id.clone(),
+            PathBuf::from(&v.path),
+        ) {
+            watchers.remove(&v.id);
+            watchers.insert(v.id.clone(), handle);
+        }
+    }
+    let _ = app.emit("folder://changed", &id);
+    Ok(())
+}
+
+#[tauri::command]
 pub fn read_folder_tree(id: String, registry: State<'_, SharedRegistry>) -> AppResult<TreeNode> {
     registry
         .tree(&id)

@@ -21,7 +21,7 @@ import {
   type AnnotatedFolder,
   type MenuAction,
 } from "@/lib/tauri";
-import { pickAndAddFolder } from "@/lib/folders";
+import { folderForPath, pickAndAddFolder } from "@/lib/folders";
 import {
   createInitialState,
   reduce,
@@ -413,10 +413,28 @@ function AppShell() {
       case "zoom-reset":
         zoomReset();
         break;
-      case "rescan-folder":
-      case "close-folder":
-        // TODO(#002)
+      case "rescan-folder": {
+        const folder = folderForPath(folders, activeTab?.filePath);
+        if (folder) {
+          try {
+            await tauri.rescanFolder(folder.id);
+          } catch (err) {
+            console.error("failed to rescan folder", err);
+          }
+        }
         break;
+      }
+      case "close-folder": {
+        const folder = folderForPath(folders, activeTab?.filePath);
+        if (folder) {
+          try {
+            await tauri.removeFolder(folder.id);
+          } catch (err) {
+            console.error("failed to close folder", err);
+          }
+        }
+        break;
+      }
       case "print":
       case "reveal":
       case "open-with":
