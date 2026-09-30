@@ -13,7 +13,7 @@ import {
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
 } from "@/components/ui/dropdown-menu";
-import { Search, Sun, Moon, Monitor, FileText, SplitSquareHorizontal, SplitSquareVertical, X, Settings, Minus, Plus } from "lucide-react";
+import { Search, Sun, Moon, Monitor, FileText, SplitSquareHorizontal, SplitSquareVertical, X, Settings, Minus, Plus, Pencil, Lock, Save, RotateCcw } from "lucide-react";
 import { useTheme, type Theme } from "@/lib/theme";
 import { usePreferences } from "@/lib/preferences";
 import type { SplitDirection } from "@/lib/workspace";
@@ -25,16 +25,81 @@ interface Props {
   onCloseSplit: () => void;
   isSplit: boolean;
   onFind: () => void;
+  mode: "read" | "edit";
+  onToggleMode: () => void;
+  dirty: boolean;
+  onSave: () => void;
+  onDiscard: () => void;
 }
 
-export function Toolbar({ filePath, onOpenFile, onSplit, onCloseSplit, isSplit, onFind }: Props) {
+export function Toolbar({
+  filePath,
+  onOpenFile,
+  onSplit,
+  onCloseSplit,
+  isSplit,
+  onFind,
+  mode,
+  onToggleMode,
+  dirty,
+  onSave,
+  onDiscard,
+}: Props) {
   const { theme, setTheme } = useTheme();
   const { copyAsMarkdown, setCopyAsMarkdown, zoom, zoomIn, zoomOut, zoomReset } = usePreferences();
   const ThemeIcon = theme === "light" ? Sun : theme === "dark" ? Moon : Monitor;
+  const ModeIcon = mode === "edit" ? Pencil : Lock;
 
   return (
     <header className="flex h-9 shrink-0 items-center justify-between border-b bg-card/40 px-3">
-      <div className="truncate text-xs text-muted-foreground">{filePath ?? "No file open"}</div>
+      <div className="flex items-center gap-2">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant={mode === "edit" ? "default" : "ghost"}
+              size="sm"
+              className="h-7 gap-1.5 px-2 text-xs"
+              onClick={onToggleMode}
+              disabled={!filePath}
+            >
+              <ModeIcon className="h-3.5 w-3.5" />
+              {mode === "edit" ? "Editing" : "Read only"}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{mode === "edit" ? "Switch to read mode (⌘E)" : "Switch to edit mode (⌘E)"}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1.5 px-2 text-xs"
+              onClick={onSave}
+              disabled={!dirty}
+            >
+              <Save className="h-3.5 w-3.5" />
+              Save
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Save (⌘S)</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1.5 px-2 text-xs"
+              onClick={onDiscard}
+              disabled={!dirty}
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              Discard changes
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Discard unsaved changes and reload from disk</TooltipContent>
+        </Tooltip>
+        <div className="truncate text-xs text-muted-foreground">{filePath ?? "No file open"}</div>
+      </div>
       <div className="flex items-center gap-1">
         <Tooltip>
           <TooltipTrigger asChild>

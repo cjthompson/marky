@@ -134,12 +134,22 @@ fn file_menu(app: &AppHandle) -> tauri::Result<FileMenuParts> {
         .accelerator("CmdOrCtrl+Shift+W")
         .build(app)?;
 
+    // Edit-mode items (#013). Save goes to File; Edit Mode and Discard are
+    // split between File and View so the shortcut groups stay conventional.
+    let save = MenuItemBuilder::with_id("save", "Save")
+        .accelerator("CmdOrCtrl+S")
+        .build(app)?;
+    let discard_changes = MenuItemBuilder::with_id("discard-changes", "Discard Changes")
+        .build(app)?;
+
     let builder = SubmenuBuilder::new(app, "File")
         .item(&open)
         .item(&open_folder)
         .item(&recent_files)
         .item(&recent_folders)
         .separator()
+        .item(&save)
+        .item(&discard_changes)
         .item(&reload_file)
         .item(&rescan_folder)
         .separator()
@@ -167,6 +177,8 @@ fn file_menu(app: &AppHandle) -> tauri::Result<FileMenuParts> {
     let file_menu = builder.build()?;
 
     let mut file_items = vec![
+        save,
+        discard_changes,
         reload_file,
         export_html,
         export_markdown,
@@ -191,14 +203,24 @@ fn file_menu(app: &AppHandle) -> tauri::Result<FileMenuParts> {
 fn edit_menu(app: &AppHandle) -> tauri::Result<Submenu<Wry>> {
     let builder = SubmenuBuilder::new(app, "Edit");
 
-    #[cfg(target_os = "macos")]
-    let builder = builder.undo().redo().separator();
+    // Custom Undo/Redo so the frontend can route them through the per-tab
+    // block-commit history when focus is outside a CodeMirror editor (see
+    // #013). The macOS auto-provided undo/redo are skipped on purpose.
+    let undo = MenuItemBuilder::with_id("undo", "Undo")
+        .accelerator("CmdOrCtrl+Z")
+        .build(app)?;
+    let redo = MenuItemBuilder::with_id("redo", "Redo")
+        .accelerator("CmdOrCtrl+Shift+Z")
+        .build(app)?;
 
     let find = MenuItemBuilder::with_id("find", "Find…")
         .accelerator("CmdOrCtrl+F")
         .build(app)?;
 
     builder
+        .item(&undo)
+        .item(&redo)
+        .separator()
         .cut()
         .copy()
         .paste()
@@ -211,6 +233,9 @@ fn edit_menu(app: &AppHandle) -> tauri::Result<Submenu<Wry>> {
 fn view_menu(app: &AppHandle) -> tauri::Result<Submenu<Wry>> {
     let command_palette = MenuItemBuilder::with_id("command-palette", "Command Palette")
         .accelerator("CmdOrCtrl+K")
+        .build(app)?;
+    let edit_mode = MenuItemBuilder::with_id("edit-mode", "Edit Mode")
+        .accelerator("CmdOrCtrl+E")
         .build(app)?;
     let split_right = MenuItemBuilder::with_id("split-right", "Split Right")
         .accelerator("CmdOrCtrl+\\")
@@ -231,6 +256,8 @@ fn view_menu(app: &AppHandle) -> tauri::Result<Submenu<Wry>> {
 
     let builder = SubmenuBuilder::new(app, "View")
         .item(&command_palette)
+        .separator()
+        .item(&edit_mode)
         .separator()
         .item(&split_right)
         .item(&split_down)

@@ -1,6 +1,7 @@
 import { useEffect, useReducer, useState, useCallback, useRef } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ThemeProvider } from "@/lib/theme";
 import { PreferencesProvider, usePreferences } from "@/lib/preferences";
 import { ResizeHandle } from "@/components/ResizeHandle";
@@ -10,6 +11,7 @@ import { Pane } from "@/components/Pane";
 import { TableOfContents } from "@/components/TableOfContents";
 import { Toolbar } from "@/components/Toolbar";
 import { CommandPalette } from "@/components/CommandPalette";
+import { UnsavedChangesDialog } from "@/components/UnsavedChangesDialog";
 import {
   tauri,
   onCliTarget,
@@ -25,7 +27,9 @@ import {
   reduce,
   getActivePane,
   getActiveTab,
+  isDirty,
   type SplitDirection,
+  type TabState,
 } from "@/lib/workspace";
 import { cn } from "@/lib/utils";
 
@@ -47,12 +51,19 @@ marky ./docs/         # open a folder (auto-saved)
 \`\`\`
 `;
 
+type PendingPrompt =
+  | { kind: "toggle-mode"; tabId: string; nextMode: "read" | "edit" }
+  | { kind: "close-tab"; tabId: string; paneId: string }
+  | { kind: "close-split" }
+  | { kind: "quit" };
+
 function AppShell() {
   const [state, dispatch] = useReducer(reduce, undefined, () => createInitialState(WELCOME));
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [searchPaneId, setSearchPaneId] = useState<string | null>(null);
   const [folders, setFolders] = useState<AnnotatedFolder[]>([]);
   const [sidebarRefresh, setSidebarRefresh] = useState(0);
+  const [pending, setPending] = useState<PendingPrompt | null>(null);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const {
     zoomIn, zoomOut, zoomReset,
@@ -63,6 +74,7 @@ function AppShell() {
   const activeTab = getActiveTab(state);
   const activePane = getActivePane(state);
   const isSplit = state.panes.length > 1;
+  const activeDirty = activeTab ? isDirty(activeTab) : false;
 
   const refreshFolders = useCallback(async () => {
     setFolders(await tauri.listFoldersGrouped());
@@ -179,6 +191,155 @@ function AppShell() {
       ?.scrollIntoView({ block: "start" });
   };
 
+  // --- Save / discard / mode -------------------------------------------------
+
+  const saveTab = useCallback(async (tab: TabState) => {
+    if (!tab.filePath || tab.savedSource === undefined) return;
+    if (tab.source === tab.savedSource) return;
+    try {
+      const outcome = await tauri.writeFile(tab.filePath, tab.source, tab.savedSource);
+      if (outcome.kind === "saved") {
+        dispatch({ type: "SAVED", tabId: tab.id, savedSource: tab.source });
+      } else {
+        // Conflict: surface the dirty-tab banner via reducer. The banner UI is
+        // built by #016; for now just log and leave the tab dirty.
+        console.warn("save conflict", tab.filePath);
+        dispatch({ type: "DISK_CONFLICT", tabId: tab.id, disk: outcome.disk });
+      }
+    } catch (err) {
+      console.error("save failed", err);
+    }
+  }, []);
+
+  const discardTab = useCallback(async (tab: TabState) => {
+    if (!tab.filePath) return;
+    try {
+      const text = await tauri.readFile(tab.filePath);
+      dispatch({ type: "UPDATE_TAB_SOURCE", tabId: tab.id, source: text });
+      // Clear any pending disk notice since the user has reloaded from disk.
+      dispatch({ type: "DISMISS_NOTICE", tabId: tab.id });
+    } catch (err) {
+      console.error("discard failed", err);
+    }
+  }, []);
+
+  const toggleMode = useCallback(() => {
+    const tab = activeTab;
+    if (!tab) return;
+    // Welcome tab has no file and is always read-only.
+    if (!tab.filePath) return;
+    const nextMode = tab.mode === "edit" ? "read" : "edit";
+    if (nextMode === "read" && isDirty(tab)) {
+      setPending({ kind: "toggle-mode", tabId: tab.id, nextMode });
+      return;
+    }
+    dispatch({ type: "SET_MODE", tabId: tab.id, mode: nextMode });
+  }, [activeTab]);
+
+  const tryCloseTab = useCallback((tabId: string, paneId: string) => {
+    const tab = state.tabs[tabId];
+    if (tab && isDirty(tab)) {
+      setPending({ kind: "close-tab", tabId, paneId });
+      return;
+    }
+    dispatch({ type: "CLOSE_TAB", tabId, paneId });
+  }, [state.tabs]);
+
+  const tryCloseSplit = useCallback(() => {
+    // CLOSE_SPLIT drops all tabs in non-active panes. If any of them is
+    // dirty, prompt before continuing.
+    const keep = state.panes.find((p) => p.id === state.activePaneId) ?? state.panes[0];
+    const dropped = state.panes.filter((p) => p.id !== keep.id).flatMap((p) => p.tabIds);
+    const dirty = dropped.some((id) => state.tabs[id] && isDirty(state.tabs[id]));
+    if (dirty) {
+      setPending({ kind: "close-split" });
+      return;
+    }
+    dispatch({ type: "CLOSE_SPLIT" });
+  }, [state.panes, state.tabs, state.activePaneId]);
+
+  const saveActiveTab = useCallback(async () => {
+    if (!activeTab) return;
+    await saveTab(activeTab);
+  }, [activeTab, saveTab]);
+
+  const discardActiveTab = useCallback(async () => {
+    if (!activeTab) return;
+    await discardTab(activeTab);
+  }, [activeTab, discardTab]);
+
+  // --- Pending prompt handlers ---------------------------------------------
+
+  const resolvePrompt = useCallback(
+    async (action: "save" | "discard" | "cancel") => {
+      const p = pending;
+      if (!p) return;
+      setPending(null);
+      if (action === "cancel") return;
+
+      if (action === "save") {
+        // Find the tab being acted on and save it before continuing.
+        const tabId =
+          p.kind === "toggle-mode" ? p.tabId
+          : p.kind === "close-tab" ? p.tabId
+          : null;
+        if (tabId) {
+          const tab = state.tabs[tabId];
+          if (tab) {
+            await saveTab(tab);
+            // If the save didn't actually mark the tab clean (conflict), abort.
+            const after = state.tabs[tabId];
+            if (after && isDirty(after)) return;
+          }
+        }
+      } else {
+        // Discard: revert the dirty tab to its savedSource in-memory.
+        const tabId =
+          p.kind === "toggle-mode" ? p.tabId
+          : p.kind === "close-tab" ? p.tabId
+          : null;
+        if (tabId) {
+          const tab = state.tabs[tabId];
+          if (tab?.savedSource !== undefined) {
+            dispatch({ type: "UPDATE_TAB_SOURCE", tabId, source: tab.savedSource });
+            dispatch({ type: "DISMISS_NOTICE", tabId });
+          }
+        }
+      }
+
+      // Continue the action.
+      if (p.kind === "toggle-mode") {
+        dispatch({ type: "SET_MODE", tabId: p.tabId, mode: p.nextMode });
+      } else if (p.kind === "close-tab") {
+        dispatch({ type: "CLOSE_TAB", tabId: p.tabId, paneId: p.paneId });
+      } else if (p.kind === "close-split") {
+        dispatch({ type: "CLOSE_SPLIT" });
+      } else if (p.kind === "quit") {
+        await getCurrentWindow().destroy();
+      }
+    },
+    [pending, state.tabs, saveTab],
+  );
+
+  // --- Window close-requested ----------------------------------------------
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    (async () => {
+      const off = await getCurrentWindow().onCloseRequested(async (event) => {
+        const anyDirty = Object.values(state.tabs).some((t) => isDirty(t));
+        if (anyDirty) {
+          event.preventDefault();
+          setPending({ kind: "quit" });
+        }
+      });
+      unlisten = off;
+    })();
+    return () => unlisten?.();
+  }, [state.tabs]);
+
+  // --- Menu wiring ---------------------------------------------------------
+
   // Route native menu actions. Kept in a ref (updated every render) so the
   // listener below is registered exactly once and never sees stale state.
   const menuHandlerRef = useRef<(action: MenuAction) => void>(() => {});
@@ -194,20 +355,40 @@ function AppShell() {
       }
       case "reload-file": {
         if (activeTab?.filePath) {
-          try {
-            const text = await tauri.readFile(activeTab.filePath);
-            dispatch({ type: "UPDATE_TAB_SOURCE", tabId: activeTab.id, source: text });
-          } catch (err) {
-            console.error("failed to reload file", err);
+          if (isDirty(activeTab)) {
+            // Reload on a dirty tab behaves like Discard changes.
+            await discardTab(activeTab);
+          } else {
+            try {
+              const text = await tauri.readFile(activeTab.filePath);
+              dispatch({ type: "UPDATE_TAB_SOURCE", tabId: activeTab.id, source: text });
+            } catch (err) {
+              console.error("failed to reload file", err);
+            }
           }
         }
         break;
       }
       case "close-tab": {
         const tabId = activePane.activeTabId;
-        if (tabId) dispatch({ type: "CLOSE_TAB", tabId, paneId: activePane.id });
+        if (tabId) tryCloseTab(tabId, activePane.id);
         break;
       }
+      case "save":
+        await saveActiveTab();
+        break;
+      case "discard-changes":
+        await discardActiveTab();
+        break;
+      case "edit-mode":
+        toggleMode();
+        break;
+      case "undo":
+        if (activeTab) dispatch({ type: "UNDO", tabId: activeTab.id });
+        break;
+      case "redo":
+        if (activeTab) dispatch({ type: "REDO", tabId: activeTab.id });
+        break;
       case "find":
         setSearchPaneId(state.activePaneId);
         break;
@@ -221,7 +402,7 @@ function AppShell() {
         dispatch({ type: "SPLIT", direction: "horizontal" });
         break;
       case "close-split":
-        handleCloseSplit();
+        tryCloseSplit();
         break;
       case "zoom-in":
         zoomIn();
@@ -264,13 +445,20 @@ function AppShell() {
         tabs={state.tabs}
         isFocused={pane.id === state.activePaneId}
         onSelectTab={(tabId) => dispatch({ type: "SWITCH_TAB", paneId: pane.id, tabId })}
-        onCloseTab={(tabId) => dispatch({ type: "CLOSE_TAB", tabId, paneId: pane.id })}
+        onCloseTab={(tabId) => tryCloseTab(tabId, pane.id)}
         onFocusPane={() => dispatch({ type: "FOCUS_PANE", paneId: pane.id })}
         searchOpen={searchPaneId === pane.id}
         onSearchClose={() => setSearchPaneId(null)}
       />
     );
   };
+
+  const promptAction =
+    pending?.kind === "toggle-mode" ? "Switching to Read mode"
+    : pending?.kind === "close-tab" ? "Closing this tab"
+    : pending?.kind === "close-split" ? "Closing the split"
+    : pending?.kind === "quit" ? "Quitting Marky"
+    : "";
 
   return (
     <div className="flex h-full">
@@ -292,9 +480,14 @@ function AppShell() {
           filePath={activeTab?.filePath}
           onOpenFile={handlePickFile}
           onSplit={handleSplit}
-          onCloseSplit={handleCloseSplit}
+          onCloseSplit={tryCloseSplit}
           isSplit={isSplit}
           onFind={() => setSearchPaneId(state.activePaneId)}
+          mode={activeTab?.mode ?? "read"}
+          onToggleMode={toggleMode}
+          dirty={activeDirty}
+          onSave={saveActiveTab}
+          onDiscard={discardActiveTab}
         />
         <div className="flex min-h-0 flex-1">
           <main className="min-w-0 flex-1">
@@ -343,6 +536,13 @@ function AppShell() {
         isSplit={isSplit}
         folders={folders}
         onJumpToFolder={handleJumpToFolder}
+      />
+      <UnsavedChangesDialog
+        open={pending !== null}
+        action={promptAction}
+        onSave={() => resolvePrompt("save")}
+        onDiscard={() => resolvePrompt("discard")}
+        onCancel={() => resolvePrompt("cancel")}
       />
     </div>
   );

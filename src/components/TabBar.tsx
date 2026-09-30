@@ -1,6 +1,6 @@
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { PaneState, TabState } from "@/lib/workspace";
+import { isDirty, type PaneState, type TabState } from "@/lib/workspace";
 
 interface Props {
   pane: PaneState;
@@ -33,6 +33,7 @@ export function TabBar({ pane, tabs, isFocused, onSelect, onClose, onFocusPane }
       {pane.tabIds.map((id) => {
         const tab = tabs[id];
         const active = id === pane.activeTabId;
+        const dirty = tab ? isDirty(tab) : false;
         return (
           <div
             key={id}
@@ -44,6 +45,13 @@ export function TabBar({ pane, tabs, isFocused, onSelect, onClose, onFocusPane }
                 : "border-transparent text-muted-foreground hover:bg-accent"
             )}
           >
+            {dirty && (
+              <span
+                aria-label="Unsaved changes"
+                title="Unsaved changes"
+                className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500"
+              />
+            )}
             <span className="max-w-[160px] truncate">{tabLabel(tab)}</span>
             <button
               type="button"
