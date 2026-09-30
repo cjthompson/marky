@@ -24,6 +24,7 @@ pub fn set_initial_target(target: InitialTarget, state: State<'_, InitialTargetS
 
 #[tauri::command]
 pub fn read_file(
+    app: AppHandle,
     path: String,
     registry: State<'_, SharedRegistry>,
     opened: State<'_, crate::OpenedFiles>,
@@ -34,6 +35,7 @@ pub fn read_file(
     if let Ok(canonical) = std::fs::canonicalize(PathBuf::from(&path)) {
         opened.inner().0.lock().insert(canonical);
     }
+    let _ = crate::menu::refresh_recent(&app);
     Ok(contents)
 }
 
@@ -139,6 +141,8 @@ pub fn add_folder(
 ) -> AppResult<Folder> {
     let folder = registry.add_folder(PathBuf::from(&path))?;
     registry.save(&data_dir())?;
+    registry.push_recent_folder(folder.path.clone());
+    let _ = registry.save(&data_dir());
     if let Ok(handle) = watch_folder(
         app.clone(),
         Arc::clone(&registry),
@@ -148,6 +152,7 @@ pub fn add_folder(
         watchers.insert(folder.id.clone(), handle);
     }
     let _ = app.emit("folder://changed", &folder.id);
+    let _ = crate::menu::refresh_recent(&app);
     Ok(folder)
 }
 

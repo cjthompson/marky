@@ -39,7 +39,7 @@ impl OpenedFiles {
 /// Handle a new CLI target from either single-instance forwarding or macOS
 /// file-open events: register folders, update managed state, emit to frontend,
 /// and focus the main window.
-fn handle_target(app: &tauri::AppHandle, target: cli::InitialTarget) {
+pub(crate) fn handle_target(app: &tauri::AppHandle, target: cli::InitialTarget) {
     let resolved = match &target {
         cli::InitialTarget::Folder { path } => {
             if let (Some(reg), Some(watchers)) = (
@@ -134,6 +134,8 @@ pub fn run() {
             let (menu, handles) = menu::build(app.handle())?;
             app.set_menu(menu)?;
             app.manage(handles);
+
+            menu::refresh_recent(app.handle())?;
 
             Ok(())
         })
