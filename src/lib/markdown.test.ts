@@ -12,7 +12,9 @@ describe("renderMarkdown", () => {
   it("renders GFM tables", () => {
     const md = `| a | b |\n|---|---|\n| 1 | 2 |\n`;
     const html = renderMarkdown(md);
-    expect(html).toContain("<table>");
+    // `data-source-map` is added by the source-map ruler; the assertion must allow
+    // attributes on the opening tag.
+    expect(html).toMatch(/<table[\s>]/);
     expect(html).toContain("<th>a</th>");
     expect(html).toContain("<td>1</td>");
   });
@@ -27,7 +29,9 @@ describe("renderMarkdown", () => {
   it("renders fenced code blocks with language class", () => {
     const md = "```ts\nconst x = 1;\n```\n";
     const html = renderMarkdown(md);
-    expect(html).toMatch(/<pre><code class="language-ts">/);
+    // `data-source-map` is injected onto the <pre> tag by the fence renderer
+    // override; allow attributes before the `>`.
+    expect(html).toMatch(/<pre[\s>][^>]*><code class="language-ts">/);
   });
 
   it("flags mermaid blocks as pending for client-side rendering", () => {
@@ -61,7 +65,9 @@ describe("renderMarkdown", () => {
 
   it("renders blockquotes", () => {
     const html = renderMarkdown("> a quote");
-    expect(html).toContain("<blockquote>");
+    // `data-source-map` is added by the source-map ruler; allow attributes on
+    // the opening tag.
+    expect(html).toMatch(/<blockquote[\s>]/);
   });
 
   it("strips YAML front matter at the top of the document", () => {

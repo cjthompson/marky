@@ -9,7 +9,11 @@ function Probe() {
 
 describe("ThemeProvider", () => {
   beforeEach(() => {
-    localStorage.clear();
+    // vitest+happy-dom does not expose `localStorage` as a global in every
+    // setup; the provider is defensive about that, and so is the test setup.
+    if (typeof localStorage !== "undefined") {
+      localStorage.clear();
+    }
     document.documentElement.classList.remove("dark");
   });
 

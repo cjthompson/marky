@@ -24,10 +24,30 @@ function applyTheme(theme: Theme): "light" | "dark" {
   return resolved;
 }
 
+// `localStorage` can be unavailable: in true SSR, in vitest+happy-dom before it
+// is wired up, or in environments where storage access throws (e.g. disabled
+// cookies). Treat all of those as "no persisted preference".
+function readStoredTheme(): Theme | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return localStorage.getItem(STORAGE_KEY) as Theme | null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredTheme(t: Theme): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(STORAGE_KEY, t);
+  } catch {
+    // storage unavailable or quota exceeded — keep theme in-memory only
+  }
+}
+
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = React.useState<Theme>(() => {
-    if (typeof window === "undefined") return "system";
-    return (localStorage.getItem(STORAGE_KEY) as Theme) || "system";
+    return readStoredTheme() || "system";
   });
   const [resolved, setResolved] = React.useState<"light" | "dark">("light");
 
@@ -44,7 +64,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }, [theme]);
 
   const setTheme = React.useCallback((t: Theme) => {
-    localStorage.setItem(STORAGE_KEY, t);
+    writeStoredTheme(t);
     setThemeState(t);
   }, []);
 
