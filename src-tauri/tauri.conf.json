@@ -43,6 +43,11 @@
         "mimeType": "text/markdown",
         "contentTypes": ["net.daringfireball.markdown"]
       }
-    ]
+    ],
+    "linux": {
+      "deb": {
+        "desktopTemplate": "Marky.desktop"
+      }
+    }
   }
 }

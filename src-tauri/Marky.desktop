@@ -1,0 +1,10 @@
+[Desktop Entry]
+Categories=Utility;TextEditor;
+Comment=A fast markdown viewer with vault support
+Exec=marky %F
+StartupWMClass=Marky
+Icon=Marky
+Name=Marky
+Terminal=false
+Type=Application
+MimeType=text/markdown
